@@ -1,0 +1,19 @@
+# Dependency directories
+backend/venv/
+frontend/node_modules/
+frontend/.next/
+
+# Environment and sensitive variables
+backend/.env
+
+# Local database and uploads
+backend/papermine.db
+backend/uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary images
+backend/temp_page_*
+*.png
