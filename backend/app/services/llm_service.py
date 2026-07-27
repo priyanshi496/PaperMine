@@ -109,6 +109,12 @@ Crucial Table Guidelines:
    - For the whole table, the sum of all item row `Amount` values must equal the invoice's Grand Total / `total_amount`.
    - Concatenation Check: OCR engines often merge the quantity digit with the amount (e.g. reading '6 16314.00' as '616314.00' or '2 1470.00' as '21470.00'). Detect these anomalies using the Grand Total sum constraint and split them back into their correct separate columns so that all math constraints align.
 
+OCR Confidence Metadata:
+Some text segments in the OCR output below are prefixed with [LOW_CONFIDENCE]. These are segments where the OCR engine had very low recognition confidence or where automated analysis detected likely gibberish patterns (e.g. excessive character repetition, non-English character sequences). For these segments:
+- Use surrounding context, common product/item names, and invoice structure to reconstruct the correct text.
+- Pay special attention to table cells marked [LOW_CONFIDENCE] — the column position is usually correct even if the text is garbled.
+- Common OCR substitution errors include: 0↔O, 1↔l↔I, 5↔S, 8↔B, rn→m. Some of these have already been auto-corrected but others may remain.
+
 Expected JSON Structure:
 {{
   "supplier_name": "string or null",

@@ -7,3 +7,6 @@ PyMuPDF
 paddlepaddle
 paddleocr
 pandas
+google-genai
+opencv-python-headless
+Pillow
