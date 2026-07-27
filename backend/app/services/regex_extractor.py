@@ -14,8 +14,8 @@ LABELS: Dict[str, List[str]] = {
     "place_of_supply": ["place of supply"],
     "hsn_sac": ["hsn", "sac", "hsn/sac", "hsn code"],
     "total_amount": [
-        "total", "grand total", "total amount", "amount payable", "invoice value",
-        "total invoice value", "net payable", "tota1", "tota", "totl",
+        "grand total", "total amount", "amount payable", "invoice value",
+        "total invoice value", "net payable", "total", "tota1", "tota", "totl",
     ],
     "taxable_value": ["taxable value", "taxable amount", "subtotal", "base amount"],
     "cgst_amount": ["cgst"],
@@ -23,9 +23,17 @@ LABELS: Dict[str, List[str]] = {
     "igst_amount": ["igst"],
 }
 
-MONEY_RE = re.compile(r"(?:₹|rs\.?|inr)?\s*(\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)", re.IGNORECASE)
-# requires a comma-grouped run for the first branch (\,\d{2,3})+ -- else falls through
-# to the plain \d+ branch, so "50000.00" isn't truncated to "500" by an early partial match.
+MONEY_RE = re.compile(
+    r"(?:₹|rs\.?|inr)?\s*"
+    r"(?<![A-Za-z0-9])"
+    r"("
+    r"\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?"
+    r"|"
+    r"\d+(?:\.\d{1,2})?"
+    r")"
+    r"(?![0-9\.%])"
+    , re.IGNORECASE
+)
 
 DATE_RE = re.compile(r"\b(\d{1,2})[/\.\-](\d{1,2})[/\.\-](\d{4}|\d{2})\b")
 
