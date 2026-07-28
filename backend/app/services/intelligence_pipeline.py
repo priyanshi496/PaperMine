@@ -245,31 +245,81 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
                     line_item_texts.append(f"{desc}: {amt}")
             db.commit()
 
-    # 10. Synthesized Document Representation & FAISS Insertion
+    # 10. Two-Stage FAISS Embedding
+    # Stage 1: Concise Document Profile (used for retrieval — finds the right invoice fast)
+    # Stage 2: Full Structured Invoice (used for answer generation — complete item/financial data)
     from app.services.vector_store import knowledge_engine
     
     doc_type = get_val("document_type") or "Invoice"
-    
-    synthesized_parts = [
-        f"Document Type: {doc_type}",
-        f"Vendor:\n{vendor.name if vendor else 'Unknown'}",
-        f"Invoice Number:\n{invoice_number}",
-        f"Date:\n{get_val('invoice_date')}",
-        f"Total Amount:\n{total_amount}",
-        f"Bank Account:\n{bank_account_number}",
-        "Items:",
-        "\n".join(line_item_texts) if line_item_texts else "None",
-        "Raw OCR Snippets:",
-        doc.ocr_text[:1000] if doc.ocr_text else ""
+    vendor_name = vendor.name if vendor else "Unknown"
+
+    # ── Stage 1: Profile Chunk ─────────────────────────────────────────────────
+    profile_parts = [
+        f"PROFILE | {doc_type} | Invoice No: {invoice_number} | Vendor: {vendor_name}",
+        f"Date: {get_val('invoice_date')} | Total: {total_amount}",
+        f"Status: {invoice.verification_status or 'pending'} | Risk Score: {invoice.risk_score or 0}",
+        f"GSTIN: {get_val('supplier_gstin') or 'N/A'}",
+        f"Category summary: {', '.join(set(t.split(':')[0].strip() for t in line_item_texts)) if line_item_texts else 'No items'}",
     ]
-    
-    synthesized_text = "\n\n".join(synthesized_parts)
-    
+    profile_text = "\n".join(profile_parts)
+
     knowledge_engine.embed_and_store(
         db=db,
         document_id=document_id,
         vendor_id=vendor.id if vendor else None,
         doc_type=doc_type,
-        category="General",
-        synthesized_text=synthesized_text
+        category="Profile",
+        synthesized_text=profile_text
+    )
+
+    # ── Stage 2: Full Structured Invoice Chunk ─────────────────────────────────
+    items_table = ""
+    table_data = get_val("table")
+    if table_data and len(table_data) > 1:
+        headers = table_data[0]
+        items_table = "| " + " | ".join(str(h) for h in headers) + " |\n"
+        items_table += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+        for row in table_data[1:]:
+            items_table += "| " + " | ".join(str(c) for c in row) + " |\n"
+    elif line_item_texts:
+        items_table = "\n".join(f"- {t}" for t in line_item_texts)
+    else:
+        items_table = "No line items available."
+
+    full_parts = [
+        f"FULL INVOICE | Invoice No: {invoice_number}",
+        f"Vendor: {vendor_name}",
+        f"Vendor Address: {get_val('supplier_address') or 'N/A'}",
+        f"Supplier GSTIN: {get_val('supplier_gstin') or 'N/A'}",
+        f"Buyer: {get_val('buyer_name') or 'N/A'}",
+        f"Buyer GSTIN: {get_val('buyer_gstin') or 'N/A'}",
+        f"Invoice Date: {get_val('invoice_date') or 'N/A'}",
+        f"Document Type: {doc_type}",
+        "",
+        "### Financial Breakdown",
+        f"Taxable Value: {get_val('taxable_value') or 'N/A'}",
+        f"Tax Rate: {get_val('tax_rate') or 'N/A'}",
+        f"Tax Amount: {get_val('tax_amount') or 'N/A'}",
+        f"Grand Total: {total_amount}",
+        "",
+        "### Purchased Items",
+        items_table,
+        "",
+        "### Payment Details",
+        f"Bank Account: {bank_account_number or 'N/A'}",
+        f"Signature Present: {get_val('signature_present') or 'N/A'}",
+        "",
+        "### Risk Information",
+        f"Risk Score: {invoice.risk_score or 0}",
+        f"Verification Status: {invoice.verification_status or 'pending'}",
+    ]
+    full_text = "\n".join(full_parts)
+
+    knowledge_engine.embed_and_store(
+        db=db,
+        document_id=document_id,
+        vendor_id=vendor.id if vendor else None,
+        doc_type=doc_type,
+        category="FullInvoice",
+        synthesized_text=full_text
     )

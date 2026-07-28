@@ -66,6 +66,7 @@ def ollama_chat(
         "model": model,
         "messages": full_messages,
         "stream": False,
+        "think": False,  # Disable Qwen3 extended thinking mode for speed
         "options": {"temperature": temperature},
     }
     result = _post("/api/chat", payload)
@@ -86,6 +87,7 @@ def ollama_generate(
         "model": model,
         "prompt": prompt,
         "stream": False,
+        "think": False,  # Disable Qwen3 extended thinking mode for speed
         "options": {"temperature": temperature},
     }
     if system:
