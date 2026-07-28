@@ -95,6 +95,7 @@ Please scan the document for the following important fields, looking for any of 
 16. "reverse_charge": Reverse charge applicability (Y/N, true/false, or null).
 17. "shipping_address": Shipping address, delivery address (if different from billing address).
 18. "transit_ref": Delivery challan, e-way bill reference, consignment note, tracking ref.
+19. "bank_account_number": Supplier bank account number, IBAN, or account details.
 
 If any field is not found in the text, return null for its value. If any other key summary fields are present (e.g. order_id, table_number, pay_mode, tip, service charge, phone_number), extract them as key-value pairs at the root level of the JSON using descriptive snake_case keys.
 
@@ -135,6 +136,7 @@ Expected JSON Structure:
   "reverse_charge": boolean or null,
   "shipping_address": "string or null",
   "transit_ref": "string or null",
+  "bank_account_number": "string or null",
   ... (any other key summary fields present in the text) ...,
   "table": [
     ["Column 1 Header", "Column 2 Header", ...],
@@ -166,3 +168,164 @@ Return ONLY the raw JSON block. No markdown explanation.
     except Exception as e:
         print(f"[LLM Service] Structured extraction failed: {e}")
     return None
+
+def call_llm_assistant_intent(query: str, chat_history: list = None) -> Optional[dict]:
+    """
+    Classifies a user query into STRUCTURED (SQL) or SEMANTIC (RAG).
+    Uses Ollama (Qwen3:8B) as primary — free, local, zero latency.
+    Falls back to Gemini/OpenAI if Ollama is unavailable.
+    """
+    load_env_file()
+    
+    history_str = ""
+    if chat_history:
+        history_str = "Previous Conversation:\n" + "\n".join(
+            [f"{msg['role']}: {msg['content']}" for msg in chat_history[-4:]]
+        ) + "\n\n"
+
+    prompt_text = f"""{history_str}The user asked: "{query}"
+
+## Routing Rules
+
+Route to STRUCTURED (SQL) if the query asks for any aggregation, count, or filter on invoice data.
+Aggregation keywords: count, how many, total, sum, average, avg, mean, highest, max, maximum, lowest, min, minimum, latest, newest, oldest, pending, verified, duplicate, high-risk, flagged.
+
+Route to SEMANTIC (RAG) ONLY if the query asks about document content, summaries, specific text, payment terms, items purchased, bank details, or names.
+Semantic examples: "summarize invoice X", "what items were bought?", "what bank details are mentioned?", "which invoices mention coffee?"
+
+## SQL Template Registry
+If STRUCTURED, choose the SINGLE best matching template:
+
+- count_invoices          -> How many invoices total / uploaded?
+- verified_invoice_count  -> How many verified / approved invoices?
+- pending_invoice_count   -> How many pending / unverified invoices?
+- total_spending          -> Total spending / sum of invoice amounts
+- average_invoice_amount  -> Average / mean invoice amount
+- highest_invoice_amount  -> Highest / maximum / largest invoice amount
+- lowest_invoice_amount   -> Lowest / minimum / smallest invoice amount
+- latest_invoice          -> Most recent / newest / latest invoice
+- oldest_invoice          -> Oldest / earliest invoice
+- duplicate_count         -> How many duplicate invoices / alerts?
+- high_risk_invoices      -> How many high-risk / flagged invoices?
+- vendor_spending         -> Spending for a specific vendor (needs vendor_name filter)
+- invoice_by_number       -> Info about a specific invoice number (needs invoice_number filter)
+
+If none of the templates fit, fallback to SEMANTIC.
+
+## Filters
+Also extract any metadata filters if explicitly mentioned.
+
+Return a JSON object ONLY (no markdown, no explanation):
+{{"intent": "STRUCTURED" | "SEMANTIC", "sql_template": "template_name" | null, "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null}}}}"""
+
+    # --- Try Ollama first (local, free) ---
+    from app.services.ollama_client import ollama_generate, ollama_is_available
+    if ollama_is_available():
+        system = (
+            "You are a precise query router for a financial AI assistant. "
+            "Your ONLY job is to output a single valid JSON object with no extra text, "
+            "no thinking, no markdown fences."
+        )
+        try:
+            raw = ollama_generate(prompt_text, system=system, temperature=0.0)
+            if raw:
+                # Strip <think>...</think> blocks that Qwen3 may emit
+                import re
+                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                # Extract the first JSON object in the response
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if match:
+                    return json.loads(match.group())
+        except Exception as e:
+            print(f"[OllamaIntent] Error: {e}")
+
+    # --- Fallback: Gemini / OpenAI ---
+    provider, client = get_llm_client()
+    if not provider or not client:
+        return {"intent": "SEMANTIC", "sql_template": None, "filters": {}}
+    try:
+        if provider == "gemini":
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt_text
+            )
+            raw = response.text.strip().removeprefix("```json").removesuffix("```").strip()
+            return json.loads(raw)
+        elif provider == "openai":
+            model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt_text}],
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content.strip())
+    except Exception as e:
+        print(f"[LLM Service] Assistant intent classification failed: {e}")
+
+    return {"intent": "SEMANTIC", "sql_template": None, "filters": {}}
+
+def call_llm_rag_answer(query: str, context: str, chat_history: list = None) -> Optional[str]:
+    """
+    Generates a final RAG answer using retrieved document chunks as context.
+    Uses Ollama (Qwen3:8B) as primary — free, local.
+    Falls back to Gemini/OpenAI if Ollama is unavailable.
+    """
+    load_env_file()
+
+    history_messages = []
+    if chat_history:
+        for msg in chat_history[-6:]:
+            role = msg.get("role", "user")
+            if role in ("user", "assistant"):
+                history_messages.append({"role": role, "content": msg["content"]})
+
+    system = (
+        "You are PaperMine's Financial AI Assistant. "
+        "Answer the user's question using ONLY the provided context snippets. "
+        "Be concise and precise. Use Indian Rupee (₹) for amounts. "
+        "If the context does not contain the answer, say exactly: "
+        "\"I don't have enough information to answer that from the available documents.\""
+    )
+
+    user_content = f"""Context from our document database:
+{context}
+
+User question: {query}"""
+
+    messages = history_messages + [{"role": "user", "content": user_content}]
+
+    # --- Try Ollama first (local, free) ---
+    from app.services.ollama_client import ollama_chat, ollama_is_available
+    if ollama_is_available():
+        try:
+            import re
+            raw = ollama_chat(messages, system=system, temperature=0.3)
+            if raw:
+                # Strip <think>...</think> blocks that Qwen3 may emit in thinking mode
+                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                return raw
+        except Exception as e:
+            print(f"[OllamaRAG] Error: {e}")
+
+    # --- Fallback: Gemini / OpenAI ---
+    provider, client = get_llm_client()
+    if not provider or not client:
+        return "I'm sorry, my language model is currently disconnected."
+
+    prompt = f"{system}\n\n{user_content}"
+    try:
+        if provider == "gemini":
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            return response.text.strip()
+        elif provider == "openai":
+            model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error generating answer: {str(e)}"

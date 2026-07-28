@@ -394,6 +394,23 @@ def _ocr_pages(pdf_document: fitz.Document, document_id: int) -> list[list[OcrLi
 
         try:
             page_lines = _ocr_single_image_adaptive(ocr, temp_image_path)
+            
+            # Health check alert if confidence is abysmally low
+            avg_conf = _avg_confidence(page_lines)
+            if avg_conf < 0.85:
+                db: Session = SessionLocal()
+                try:
+                    alert = models.InsightAlert(
+                        document_id=document_id,
+                        alert_type="HealthCheck",
+                        severity="high",
+                        message=f"Warning: OCR confidence is extremely low ({avg_conf:.2f}) on page {page_num + 1}. The document might be blurry, cropped, or rotated."
+                    )
+                    db.add(alert)
+                    db.commit()
+                finally:
+                    db.close()
+                    
             # Apply post-processing (gibberish detection, char fixes, confidence tagging)
             page_lines = postprocess_ocr_lines(page_lines)
             pages_lines.append(page_lines)
@@ -563,6 +580,11 @@ def process_document(document_id: int):
                 db.query(models.Table).filter(models.Table.document_id == document_id).delete()
                 db.add(models.Table(document_id=document_id, page=1, json_data=json.dumps(llm_table)))
                 db.commit()
+                
+            # Run Intelligence Pipeline (Fraud/Duplicate Detection & Entity Creation)
+            from app.services.intelligence_pipeline import run_intelligence_pipeline
+            run_intelligence_pipeline(db, document_id, structured)
+            
         except Exception as e:
             print(f"[Document {document_id}] Field extraction error: {e}")
 
@@ -570,8 +592,9 @@ def process_document(document_id: int):
         # produce a table (e.g. the LLM call itself failed, not just one field
         # being null): pdfplumber/PP-StructureV3 first, then local OCR-box
         # reconstruction as the last resort for scanned borderless docs.
-        doc.status = "extracting_tables"
-        db.commit()
+        if not doc.status.startswith("duplicate"):
+            doc.status = "extracting_tables"
+            db.commit()
         have_table = db.query(models.Table).filter(models.Table.document_id == document_id).count() > 0
         if not have_table:
             from app.services.table_extractor import extract_tables, _clean_and_structure_table
@@ -594,8 +617,9 @@ def process_document(document_id: int):
                         ))
                 db.commit()
 
-        doc.status = "processed"
-        db.commit()
+        if not doc.status.startswith("duplicate"):
+            doc.status = "processed"
+            db.commit()
 
     except Exception as e:
         print(f"[Document {document_id}] Processing error: {e}")

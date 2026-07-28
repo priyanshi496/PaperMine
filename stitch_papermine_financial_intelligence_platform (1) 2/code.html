@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PaperMine | AI Assistant</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..900&display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary-fixed-variant": "#3f465c",
+                    "background": "#f7f9fb",
+                    "on-secondary-container": "#fefcff",
+                    "on-tertiary-fixed-variant": "#005236",
+                    "primary-fixed-dim": "#bec6e0",
+                    "surface": "#f7f9fb",
+                    "on-tertiary-fixed": "#002113",
+                    "secondary-fixed-dim": "#adc6ff",
+                    "tertiary-container": "#002113",
+                    "outline-variant": "#c6c6cd",
+                    "surface-tint": "#565e74",
+                    "surface-variant": "#e0e3e5",
+                    "surface-dim": "#d8dadc",
+                    "on-background": "#191c1e",
+                    "inverse-on-surface": "#eff1f3",
+                    "on-error": "#ffffff",
+                    "secondary-fixed": "#d8e2ff",
+                    "on-error-container": "#93000a",
+                    "outline": "#76777d",
+                    "surface-container": "#eceef0",
+                    "surface-container-high": "#e6e8ea",
+                    "tertiary-fixed": "#6ffbbe",
+                    "tertiary-fixed-dim": "#4edea3",
+                    "on-secondary": "#ffffff",
+                    "primary-container": "#131b2e",
+                    "on-surface-variant": "#45464d",
+                    "on-secondary-fixed-variant": "#004395",
+                    "surface-bright": "#f7f9fb",
+                    "surface-container-highest": "#e0e3e5",
+                    "tertiary": "#000000",
+                    "surface-container-low": "#f2f4f6",
+                    "primary": "#000000",
+                    "on-primary-fixed": "#131b2e",
+                    "error": "#ba1a1a",
+                    "on-surface": "#191c1e",
+                    "on-tertiary": "#ffffff",
+                    "inverse-primary": "#bec6e0",
+                    "primary-fixed": "#dae2fd",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary-fixed": "#001a42",
+                    "secondary-container": "#2170e4",
+                    "on-primary-container": "#7c839b",
+                    "error-container": "#ffdad6",
+                    "on-primary": "#ffffff",
+                    "on-tertiary-container": "#009668",
+                    "inverse-surface": "#2d3133",
+                    "secondary": "#0058be"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "density-lg": "1rem",
+                    "density-xs": "0.25rem",
+                    "gutter": "1rem",
+                    "density-md": "0.75rem",
+                    "density-sm": "0.5rem",
+                    "margin-page": "2rem",
+                    "container-max": "1600px",
+                    "sidebar-collapsed": "64px",
+                    "sidebar-width": "260px"
+            },
+            "fontFamily": {
+                    "label-sm": ["JetBrains Mono"],
+                    "headline-sm": ["Inter"],
+                    "label-md": ["JetBrains Mono"],
+                    "headline-md": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.03em", "fontWeight": "500"}],
+                    "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "display-lg": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .chat-scrollbar::-webkit-scrollbar { width: 4px; }
+        .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .chat-scrollbar::-webkit-scrollbar-thumb { background: #e0e3e5; border-radius: 10px; }
+        .glass-effect { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden">
+<!-- Sidebar Navigation (Predicted Component: SideNavBar) -->
+<aside class="h-screen w-sidebar-width fixed left-0 top-0 bg-primary-container dark:bg-primary-container border-r border-outline-variant flex flex-col py-density-lg z-50">
+<div class="px-6 mb-10 flex items-center gap-3">
+<div class="w-8 h-8 bg-secondary flex items-center justify-center rounded">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-headline-sm font-bold text-white">PaperMine</h1>
+<p class="text-[10px] text-on-primary-container uppercase tracking-widest font-label-sm">Financial Intel</p>
+</div>
+</div>
+<nav class="flex-1 px-2 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors group" href="#">
+<span class="material-symbols-outlined text-on-primary-container group-hover:text-white">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors group" href="#">
+<span class="material-symbols-outlined text-on-primary-container group-hover:text-white">description</span>
+<span class="font-label-md text-label-md">Documents</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors group" href="#">
+<span class="material-symbols-outlined text-on-primary-container group-hover:text-white">storefront</span>
+<span class="font-label-md text-label-md">Vendors</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors group" href="#">
+<span class="material-symbols-outlined text-on-primary-container group-hover:text-white">monitoring</span>
+<span class="font-label-md text-label-md">Analytics</span>
+</a>
+<!-- Active State: AI Assistant -->
+<a class="flex items-center gap-3 px-4 py-3 bg-surface-container-low text-secondary border-l-2 border-secondary rounded-r transition-colors" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+<span class="font-label-md text-label-md font-bold">AI Assistant</span>
+</a>
+</nav>
+<div class="px-2 mt-auto border-t border-on-primary-container/10 pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant rounded transition-colors" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-label-md text-label-md">Support</span>
+</a>
+</div>
+</aside>
+<!-- Top App Bar (Predicted Component: TopAppBar) -->
+<header class="fixed top-0 right-0 w-[calc(100%-260px)] h-16 bg-surface border-b border-outline-variant flex justify-between items-center px-gutter z-40">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-sm">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-lg pl-10 pr-4 py-2 text-body-sm focus:ring-1 focus:ring-secondary transition-all" placeholder="Search transactions, files, or insights..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4">
+<button class="relative text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">history</span>
+</button>
+</div>
+<div class="h-8 w-px bg-outline-variant"></div>
+<div class="flex items-center gap-3">
+<div class="text-right">
+<p class="font-label-md text-label-md font-bold text-on-surface">Alex Mercer</p>
+<p class="text-[10px] text-on-surface-variant font-label-sm">CFO - TechCorp</p>
+</div>
+<img class="w-8 h-8 rounded-full border border-outline-variant object-cover" data-alt="A professional headshot of a corporate executive in a modern office setting. Soft lighting highlights professional attire, reflecting a light-mode aesthetic. High-quality corporate photography, minimalist background, authoritative yet approachable vibe." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDKTLYjT3YRkX5v8tr5KytbrlchclgcVlxQIrJwvLbXmcBn2ItFc4h0Z-UO27LtH2R5yq6pRFJ-YMEYrd9OowvPJECs1akRSpqWXGuQBoG48YY5LugZT3O8kqXcDV8-_JxtLjPFplppzBPPDidj8qsBSHYjZYZn00Q1I4r0Tog_VYhSq3cRUlgs2jRi-vKcnj0qtwiqpZeIPfSnmq-_g-tYxHceaArKes0rQkYYorI5lSv0aYcTKM8Qsw"/>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-[260px] pt-16 h-screen flex bg-background">
+<!-- Central Chat Interface -->
+<section class="flex-1 flex flex-col h-full relative border-r border-outline-variant">
+<!-- Chat Header -->
+<div class="px-8 py-6 border-b border-outline-variant flex items-center justify-between glass-effect">
+<div>
+<h2 class="font-headline-md text-headline-md text-primary">Financial Intelligence Assistant</h2>
+<p class="text-body-sm text-on-surface-variant">Ask anything about your cash flow, taxes, or vendor contracts.</p>
+</div>
+<div class="flex gap-2">
+<span class="flex items-center gap-1.5 px-3 py-1 bg-tertiary-fixed text-on-tertiary-container rounded-full text-[11px] font-label-md">
+<span class="w-1.5 h-1.5 bg-on-tertiary-container rounded-full animate-pulse"></span>
+                        Live Analysis
+                    </span>
+</div>
+</div>
+<!-- Messages Area -->
+<div class="flex-1 overflow-y-auto chat-scrollbar p-8 space-y-8">
+<!-- System Greeting -->
+<div class="flex gap-4 max-w-3xl">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+</div>
+<div class="space-y-4">
+<div class="p-4 bg-white border border-outline-variant rounded-xl rounded-tl-none shadow-sm">
+<p class="text-body-md text-on-surface">Good morning, Alex. I've finished indexing the Q3 vendor invoices. How can I help you navigate your data today?</p>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<button class="text-left p-3 border border-outline-variant rounded-lg hover:border-secondary hover:bg-secondary-fixed/20 transition-all group">
+<p class="text-body-sm font-semibold group-hover:text-secondary">"Show Amazon invoices above ₹50,000"</p>
+<p class="text-[11px] text-on-surface-variant mt-1">Filtering by vendor & amount</p>
+</button>
+<button class="text-left p-3 border border-outline-variant rounded-lg hover:border-secondary hover:bg-secondary-fixed/20 transition-all group">
+<p class="text-body-sm font-semibold group-hover:text-secondary">"Predict next month's cash flow"</p>
+<p class="text-[11px] text-on-surface-variant mt-1">Forecasting based on pending payables</p>
+</button>
+</div>
+</div>
+</div>
+<!-- User Message -->
+<div class="flex gap-4 max-w-3xl ml-auto flex-row-reverse">
+<div class="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white">person</span>
+</div>
+<div class="p-4 bg-primary-container text-white rounded-xl rounded-tr-none shadow-sm">
+<p class="text-body-md">Analyze vendor concentration for the last 6 months.</p>
+</div>
+</div>
+<!-- AI Response with Rich Content -->
+<div class="flex gap-4 max-w-4xl">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+</div>
+<div class="flex-1 space-y-4">
+<div class="p-4 bg-white border border-outline-variant rounded-xl rounded-tl-none shadow-sm">
+<p class="text-body-md text-on-surface">Here is the vendor concentration analysis. **Amazon Web Services** and **Google Cloud** remain your highest expenditure, accounting for 42% of total operational costs.</p>
+<!-- Mini Chart Result -->
+<div class="mt-4 p-4 bg-surface-container-low rounded-lg border border-outline-variant">
+<div class="flex justify-between items-end h-32 gap-2">
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[80%] bg-secondary w-full rounded-t-sm"></div>
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-black text-white text-[10px] px-2 py-1 rounded transition-opacity">₹4.2M</div>
+</div>
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[65%] bg-secondary w-full rounded-t-sm"></div>
+</div>
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[40%] bg-secondary w-full rounded-t-sm"></div>
+</div>
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[90%] bg-secondary w-full rounded-t-sm"></div>
+</div>
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[55%] bg-secondary w-full rounded-t-sm"></div>
+</div>
+<div class="flex-1 bg-secondary-container rounded-t-sm relative group">
+<div class="h-[70%] bg-secondary w-full rounded-t-sm"></div>
+</div>
+</div>
+<div class="flex justify-between mt-2 text-[10px] text-on-surface-variant font-label-sm">
+<span>APR</span><span>MAY</span><span>JUN</span><span>JUL</span><span>AUG</span><span>SEP</span>
+</div>
+</div>
+</div>
+<!-- Snippet Card -->
+<div class="flex gap-3">
+<div class="p-3 bg-white border border-outline-variant rounded-lg flex items-start gap-3 w-full max-w-sm hover:shadow-md transition-shadow cursor-pointer">
+<div class="w-10 h-10 bg-error-container text-error flex items-center justify-center rounded shrink-0">
+<span class="material-symbols-outlined">picture_as_pdf</span>
+</div>
+<div>
+<p class="text-body-sm font-bold truncate">AWS_Invoice_SEP_2023.pdf</p>
+<p class="text-[11px] text-on-surface-variant">Detected: Auto-renewal spike (+15%)</p>
+</div>
+<span class="material-symbols-outlined text-outline ml-auto">open_in_new</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Input Bar -->
+<div class="p-6 bg-white border-t border-outline-variant">
+<div class="max-w-4xl mx-auto relative">
+<div class="flex items-center gap-2 mb-3">
+<button class="px-3 py-1 bg-surface-container-high hover:bg-surface-variant text-[11px] font-label-md rounded border border-outline-variant transition-colors">Compare with Q2</button>
+<button class="px-3 py-1 bg-surface-container-high hover:bg-surface-variant text-[11px] font-label-md rounded border border-outline-variant transition-colors">Export as PDF</button>
+</div>
+<div class="relative flex items-end gap-3 bg-surface-container-low border border-outline-variant rounded-xl p-3 focus-within:ring-1 focus-within:ring-secondary transition-all">
+<button class="p-2 text-outline hover:text-secondary transition-colors">
+<span class="material-symbols-outlined">attach_file</span>
+</button>
+<textarea class="flex-1 bg-transparent border-none resize-none py-2 text-body-md focus:ring-0 placeholder:text-outline-variant" placeholder="Type your financial query here..." rows="1"></textarea>
+<button class="w-10 h-10 bg-primary text-white rounded-lg flex items-center justify-center hover:bg-secondary transition-colors shadow-sm">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">send</span>
+</button>
+</div>
+<div class="mt-2 flex justify-between px-1">
+<p class="text-[10px] text-on-surface-variant italic">AI Assistant can make mistakes. Please verify critical financial figures.</p>
+<div class="flex gap-3">
+<span class="text-[10px] font-label-md text-on-surface-variant">Tokens used: 1.2k / 10k</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Sidebar: Insights & Recent -->
+<aside class="w-80 h-full bg-white flex flex-col p-6 overflow-y-auto chat-scrollbar">
+<div class="space-y-8">
+<!-- Pinned Insights -->
+<div>
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-label-md text-label-md font-bold uppercase tracking-wider text-outline">Pinned Insights</h3>
+<span class="material-symbols-outlined text-outline text-sm">push_pin</span>
+</div>
+<div class="space-y-3">
+<div class="p-4 bg-secondary/5 border-l-2 border-secondary rounded-r-lg">
+<p class="text-body-sm font-bold text-secondary">Burn Rate Warning</p>
+<p class="text-[12px] text-on-surface-variant mt-1">OpEx increased by 22% in August due to cloud licensing costs.</p>
+</div>
+<div class="p-4 bg-tertiary-container/5 border-l-2 border-on-tertiary-container rounded-r-lg">
+<p class="text-body-sm font-bold text-on-tertiary-container">Tax Optimization</p>
+<p class="text-[12px] text-on-surface-variant mt-1">₹1.2M in Section 80C eligible deductions identified.</p>
+</div>
+</div>
+</div>
+<!-- Recent Queries -->
+<div>
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-label-md text-label-md font-bold uppercase tracking-wider text-outline">Recent Queries</h3>
+<span class="material-symbols-outlined text-outline text-sm">history</span>
+</div>
+<div class="space-y-1">
+<button class="w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container rounded-md transition-colors flex items-center justify-between group">
+<span class="truncate">Q3 Balance Sheet Summary</span>
+<span class="material-symbols-outlined text-[14px] text-outline opacity-0 group-hover:opacity-100">arrow_forward</span>
+</button>
+<button class="w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container rounded-md transition-colors flex items-center justify-between group">
+<span class="truncate">Travel expenses for Sales team</span>
+<span class="material-symbols-outlined text-[14px] text-outline opacity-0 group-hover:opacity-100">arrow_forward</span>
+</button>
+<button class="w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container rounded-md transition-colors flex items-center justify-between group">
+<span class="truncate">Pending TDS filings Sept</span>
+<span class="material-symbols-outlined text-[14px] text-outline opacity-0 group-hover:opacity-100">arrow_forward</span>
+</button>
+<button class="w-full text-left px-3 py-2 text-body-sm text-on-surface hover:bg-surface-container rounded-md transition-colors flex items-center justify-between group">
+<span class="truncate">Subscription audit log</span>
+<span class="material-symbols-outlined text-[14px] text-outline opacity-0 group-hover:opacity-100">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- User Quick Stats -->
+<div class="pt-6 border-t border-outline-variant">
+<div class="bg-primary-container p-4 rounded-xl text-white relative overflow-hidden">
+<div class="relative z-10">
+<p class="text-[10px] font-label-sm text-on-primary-container uppercase">Data Efficiency</p>
+<p class="text-headline-md font-bold mt-1">98.4%</p>
+<p class="text-[11px] text-on-primary-container mt-2">AI accuracy rating based on 2,400 audited transactions.</p>
+</div>
+<!-- Subtle abstract decoration -->
+<div class="absolute -right-4 -bottom-4 w-24 h-24 bg-white/5 rounded-full blur-2xl"></div>
+</div>
+</div>
+</div>
+</aside>
+</main>
+<script>
+        // Auto-expand textarea script
+        const tx = document.getElementsByTagName("textarea");
+        for (let i = 0; i < tx.length; i++) {
+          tx[i].setAttribute("style", "height:" + (tx[i].scrollHeight) + "px;overflow-y:hidden;");
+          tx[i].addEventListener("input", OnInput, false);
+        }
+
+        function OnInput() {
+          this.style.height = 0;
+          this.style.height = (this.scrollHeight) + "px";
+        }
+    </script>
+</body></html>

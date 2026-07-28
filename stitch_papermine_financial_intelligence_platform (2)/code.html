@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PaperMine | Financial Intelligence Documents</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Load Tailwind Config -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-primary-fixed-variant": "#3f465c",
+                "background": "#f7f9fb",
+                "on-secondary-container": "#fefcff",
+                "on-tertiary-fixed-variant": "#005236",
+                "primary-fixed-dim": "#bec6e0",
+                "surface": "#f7f9fb",
+                "on-tertiary-fixed": "#002113",
+                "secondary-fixed-dim": "#adc6ff",
+                "tertiary-container": "#002113",
+                "outline-variant": "#c6c6cd",
+                "surface-tint": "#565e74",
+                "surface-variant": "#e0e3e5",
+                "surface-dim": "#d8dadc",
+                "on-background": "#191c1e",
+                "inverse-on-surface": "#eff1f3",
+                "on-error": "#ffffff",
+                "secondary-fixed": "#d8e2ff",
+                "on-error-container": "#93000a",
+                "outline": "#76777d",
+                "surface-container": "#eceef0",
+                "surface-container-high": "#e6e8ea",
+                "tertiary-fixed": "#6ffbbe",
+                "tertiary-fixed-dim": "#4edea3",
+                "on-secondary": "#ffffff",
+                "primary-container": "#131b2e",
+                "on-surface-variant": "#45464d",
+                "on-secondary-fixed-variant": "#004395",
+                "surface-bright": "#f7f9fb",
+                "surface-container-highest": "#e0e3e5",
+                "tertiary": "#000000",
+                "surface-container-low": "#f2f4f6",
+                "primary": "#000000",
+                "on-primary-fixed": "#131b2e",
+                "error": "#ba1a1a",
+                "on-surface": "#191c1e",
+                "on-tertiary": "#ffffff",
+                "inverse-primary": "#bec6e0",
+                "primary-fixed": "#dae2fd",
+                "surface-container-lowest": "#ffffff",
+                "on-secondary-fixed": "#001a42",
+                "secondary-container": "#2170e4",
+                "on-primary-container": "#7c839b",
+                "error-container": "#ffdad6",
+                "on-primary": "#ffffff",
+                "on-tertiary-container": "#009668",
+                "inverse-surface": "#2d3133",
+                "secondary": "#0058be"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+            },
+            "spacing": {
+                "density-lg": "1rem",
+                "density-xs": "0.25rem",
+                "gutter": "1rem",
+                "density-md": "0.75rem",
+                "density-sm": "0.5rem",
+                "margin-page": "2rem",
+                "container-max": "1600px",
+                "sidebar-collapsed": "64px",
+                "sidebar-width": "260px"
+            },
+            "fontFamily": {
+                "label-sm": ["JetBrains Mono"],
+                "headline-sm": ["Inter"],
+                "label-md": ["JetBrains Mono"],
+                "headline-md": ["Inter"],
+                "body-lg": ["Inter"],
+                "display-lg": ["Inter"],
+                "body-md": ["Inter"],
+                "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.03em", "fontWeight": "500"}],
+                "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "display-lg": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        display: inline-block;
+        vertical-align: middle;
+      }
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #c6c6cd;
+        border-radius: 10px;
+      }
+      .document-table tr:nth-child(even) {
+        background-color: #f8fafc;
+      }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden">
+<!-- Persistent SideNavBar -->
+<aside class="h-screen w-sidebar-width fixed left-0 top-0 bg-primary-container dark:bg-primary-container border-r border-outline-variant dark:border-outline flex flex-col py-density-lg z-50">
+<div class="px-6 mb-10">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-secondary rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">description</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-headline-sm font-bold text-on-primary dark:text-primary-fixed leading-none">PaperMine</h1>
+<span class="font-label-sm text-label-sm text-on-primary-container">Financial Intel</span>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Active State Logic: Documents is current -->
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-surface-container-low text-secondary border-l-2 border-secondary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-label-md text-label-md">Documents</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="storefront">storefront</span>
+<span class="font-label-md text-label-md">Vendors</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="monitoring">monitoring</span>
+<span class="font-label-md text-label-md">Analytics</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="smart_toy">smart_toy</span>
+<span class="font-label-md text-label-md">AI Assistant</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-on-primary-container/10 pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-primary-container hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+<span class="font-label-md text-label-md">Support</span>
+</a>
+</div>
+</aside>
+<!-- Persistent TopAppBar -->
+<header class="fixed top-0 right-0 w-[calc(100%-260px)] h-16 bg-surface dark:bg-surface-dim border-b border-outline-variant dark:border-outline flex justify-between items-center px-gutter z-40">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-full max-w-xl group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-lg pl-10 pr-4 py-2 text-body-sm font-body-sm focus:ring-1 focus:ring-secondary transition-all" placeholder="Smart Search documents, vendors, or IDs..." type="text"/>
+</div>
+<div class="flex gap-1">
+<button class="px-3 py-1.5 rounded bg-secondary-container text-on-secondary-container text-label-sm font-label-sm hover:brightness-95 transition-all">Invoices</button>
+<button class="px-3 py-1.5 rounded bg-surface-container text-on-surface-variant text-label-sm font-label-sm hover:bg-surface-container-high transition-all">Receipts</button>
+<button class="px-3 py-1.5 rounded bg-surface-container text-on-surface-variant text-label-sm font-label-sm hover:bg-surface-container-high transition-all">Contracts</button>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-3">
+<button class="text-on-surface-variant hover:text-primary transition-all relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined">history</span>
+</button>
+</div>
+<div class="flex items-center gap-3 pl-6 border-l border-outline-variant">
+<div class="text-right hidden xl:block">
+<p class="font-label-md text-label-md text-on-surface leading-none mb-1">Alex Sterling</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant leading-none">Senior Auditor</p>
+</div>
+<div class="w-8 h-8 rounded-full bg-secondary-fixed flex items-center justify-center overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="A professional corporate headshot of a person with a clean, minimalist background, captured in high-resolution with soft, natural light-mode studio lighting. The person is wearing a dark navy blazer, looking confident and approachable. The overall aesthetic is modern, authoritative, and perfectly suited for a financial intelligence platform like PaperMine." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAGmG_OSuXwU8CXkyMrA2yNg_kCH_Qjec_YnYZR8HFfngPRgLm6ox4HlNINTxyrHe7v85nmSFZRcr5XGxlY_J-Lgg_fYs2z5975iJLlTS5Xzu5I-BYUP-t-_cSHYUHwrxv0YBX8OtCMJR_BmMt20YGxIO8fVtXalBoRXaaTywtWvXkj3vx0rwSyszRWEau72mYW-r_qbkFeL9ktpJ93vlN1_QzGdz-nJApUN3ZezOz6JOn81PuOBjT09A"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-sidebar-width pt-16 h-screen flex overflow-hidden">
+<!-- Table Section (Fluid Grid) -->
+<div class="flex-1 overflow-auto p-gutter custom-scrollbar">
+<div class="flex items-center justify-between mb-6">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Document Repository</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Manage and audit your firm's incoming financial records.</p>
+</div>
+<div class="flex gap-3">
+<button class="flex items-center gap-2 px-4 py-2 border border-slate-200 bg-white text-on-surface text-body-sm font-medium hover:bg-slate-50 rounded transition-all">
+<span class="material-symbols-outlined text-[18px]">filter_list</span>
+                        Filters
+                    </button>
+<button class="flex items-center gap-2 px-4 py-2 bg-primary-container text-white text-body-sm font-medium hover:brightness-110 rounded transition-all">
+<span class="material-symbols-outlined text-[18px]">upload</span>
+                        Upload Files
+                    </button>
+</div>
+</div>
+<!-- Bento Stats Summary (Optional high-end UI) -->
+<div class="grid grid-cols-4 gap-4 mb-8">
+<div class="bg-white border border-outline-variant p-4 rounded-lg">
+<p class="font-label-sm text-label-sm text-on-surface-variant mb-1 uppercase tracking-wider">Total Documents</p>
+<div class="flex items-end justify-between">
+<span class="font-headline-md text-headline-md">1,248</span>
+<span class="text-on-tertiary-container font-label-sm">+12%</span>
+</div>
+</div>
+<div class="bg-white border border-outline-variant p-4 rounded-lg">
+<p class="font-label-sm text-label-sm text-on-surface-variant mb-1 uppercase tracking-wider">Processing</p>
+<div class="flex items-end justify-between">
+<span class="font-headline-md text-headline-md text-secondary">42</span>
+<span class="text-on-surface-variant font-label-sm">Live</span>
+</div>
+</div>
+<div class="bg-white border border-outline-variant p-4 rounded-lg">
+<p class="font-label-sm text-label-sm text-on-surface-variant mb-1 uppercase tracking-wider">Flagged Risk</p>
+<div class="flex items-end justify-between">
+<span class="font-headline-md text-headline-md text-error">7</span>
+<span class="text-error font-label-sm">Action Required</span>
+</div>
+</div>
+<div class="bg-white border border-outline-variant p-4 rounded-lg">
+<p class="font-label-sm text-label-sm text-on-surface-variant mb-1 uppercase tracking-wider">Avg OCR Accuracy</p>
+<div class="flex items-end justify-between">
+<span class="font-headline-md text-headline-md">98.4%</span>
+<span class="material-symbols-outlined text-on-tertiary-container">verified</span>
+</div>
+</div>
+</div>
+<!-- Main Data Table -->
+<div class="bg-white border border-outline-variant rounded-lg overflow-hidden shadow-sm">
+<table class="w-full text-left border-collapse document-table">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase">Document Name</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase">Vendor</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase">Amount</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase">Date</th>
+<th class="p-4 font-label-md text-label-md text-on-surface-variant uppercase">Status</th>
+<th class="p-4 w-12"></th>
+</tr>
+</thead>
+<tbody class="text-body-sm font-body-sm">
+<!-- Row 1 -->
+<tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="updateHealthCheck('INV-2024-001', 'CloudScale Systems', '$14,200.00', 'Verified', 99)">
+<td class="p-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary">article</span>
+<span class="font-semibold text-on-surface">INV-2024-001.pdf</span>
+</div>
+</td>
+<td class="p-4 text-on-surface-variant">CloudScale Systems</td>
+<td class="p-4 font-label-md text-label-md">$14,200.00</td>
+<td class="p-4 text-on-surface-variant">May 12, 2024</td>
+<td class="p-4">
+<span class="px-2 py-1 rounded bg-tertiary-fixed text-on-tertiary-fixed-variant text-[11px] font-bold uppercase tracking-tight">Verified</span>
+</td>
+<td class="p-4">
+<button class="opacity-0 group-hover:opacity-100 material-symbols-outlined text-on-surface-variant">more_vert</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="updateHealthCheck('CNT-882-X', 'Global Logistics', 'N/A', 'Flagged', 64)">
+<td class="p-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary">description</span>
+<span class="font-semibold text-on-surface">Service_Contract_Q2.pdf</span>
+</div>
+</td>
+<td class="p-4 text-on-surface-variant">Global Logistics</td>
+<td class="p-4 font-label-md text-label-md">—</td>
+<td class="p-4 text-on-surface-variant">May 11, 2024</td>
+<td class="p-4">
+<span class="px-2 py-1 rounded bg-error-container text-on-error-container text-[11px] font-bold uppercase tracking-tight">Flagged</span>
+</td>
+<td class="p-4">
+<button class="opacity-0 group-hover:opacity-100 material-symbols-outlined text-on-surface-variant">more_vert</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="updateHealthCheck('REC-9942', 'Amazon Web Services', '$2,450.12', 'Processing', 82)">
+<td class="p-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary">receipt_long</span>
+<span class="font-semibold text-on-surface">AWS_Usage_May.png</span>
+</div>
+</td>
+<td class="p-4 text-on-surface-variant">Amazon Web Services</td>
+<td class="p-4 font-label-md text-label-md">$2,450.12</td>
+<td class="p-4 text-on-surface-variant">May 10, 2024</td>
+<td class="p-4">
+<span class="px-2 py-1 rounded bg-secondary-fixed text-on-secondary-fixed-variant text-[11px] font-bold uppercase tracking-tight">Processing</span>
+</td>
+<td class="p-4">
+<button class="opacity-0 group-hover:opacity-100 material-symbols-outlined text-on-surface-variant">more_vert</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="updateHealthCheck('INV-2024-002', 'Adobe Creative', '$600.00', 'Verified', 97)">
+<td class="p-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary">article</span>
+<span class="font-semibold text-on-surface">CreativeSuite_Sub.pdf</span>
+</div>
+</td>
+<td class="p-4 text-on-surface-variant">Adobe Creative</td>
+<td class="p-4 font-label-md text-label-md">$600.00</td>
+<td class="p-4 text-on-surface-variant">May 09, 2024</td>
+<td class="p-4">
+<span class="px-2 py-1 rounded bg-tertiary-fixed text-on-tertiary-fixed-variant text-[11px] font-bold uppercase tracking-tight">Verified</span>
+</td>
+<td class="p-4">
+<button class="opacity-0 group-hover:opacity-100 material-symbols-outlined text-on-surface-variant">more_vert</button>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="updateHealthCheck('INV-2024-003', 'HackerRank Inc', '$5,000.00', 'Verified', 100)">
+<td class="p-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary">article</span>
+<span class="font-semibold text-on-surface">Recruitment_Tooling.pdf</span>
+</div>
+</td>
+<td class="p-4 text-on-surface-variant">HackerRank Inc</td>
+<td class="p-4 font-label-md text-label-md">$5,000.00</td>
+<td class="p-4 text-on-surface-variant">May 08, 2024</td>
+<td class="p-4">
+<span class="px-2 py-1 rounded bg-tertiary-fixed text-on-tertiary-fixed-variant text-[11px] font-bold uppercase tracking-tight">Verified</span>
+</td>
+<td class="p-4">
+<button class="opacity-0 group-hover:opacity-100 material-symbols-outlined text-on-surface-variant">more_vert</button>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="p-4 border-t border-outline-variant flex items-center justify-between bg-surface-container-low">
+<span class="text-body-sm text-on-surface-variant font-body-sm">Showing 5 of 1,248 documents</span>
+<div class="flex gap-2">
+<button class="px-3 py-1 border border-outline-variant rounded text-on-surface-variant hover:bg-white transition-all"><span class="material-symbols-outlined text-[18px]">chevron_left</span></button>
+<button class="px-3 py-1 border border-outline-variant rounded text-on-surface-variant hover:bg-white transition-all"><span class="material-symbols-outlined text-[18px]">chevron_right</span></button>
+</div>
+</div>
+</div>
+</div>
+<!-- Document Health Check Side Panel -->
+<aside class="w-80 bg-surface-container border-l border-outline-variant flex flex-col p-6 overflow-y-auto custom-scrollbar">
+<h3 class="font-headline-sm text-headline-sm text-on-surface mb-6">Health Check</h3>
+<div class="space-y-6" id="health-preview-card">
+<!-- Document Thumbnail Simulation -->
+<div class="w-full aspect-[3/4] bg-white border border-outline-variant rounded-lg p-4 relative overflow-hidden shadow-sm group">
+<div class="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<button class="bg-primary-container text-white p-2 rounded-full shadow-lg">
+<span class="material-symbols-outlined">zoom_in</span>
+</button>
+</div>
+<!-- Minimalist Doc Scan Abstract Representation -->
+<div class="space-y-3 opacity-30">
+<div class="h-2 w-1/2 bg-slate-200 rounded"></div>
+<div class="h-10 w-full bg-slate-100 rounded"></div>
+<div class="h-2 w-3/4 bg-slate-200 rounded"></div>
+<div class="h-2 w-5/6 bg-slate-200 rounded"></div>
+<div class="h-2 w-full bg-slate-200 rounded"></div>
+<div class="h-2 w-2/3 bg-slate-200 rounded"></div>
+<div class="h-10 w-full bg-slate-100 rounded"></div>
+<div class="mt-8 pt-8 border-t border-slate-200">
+<div class="h-2 w-1/4 bg-slate-300 rounded ml-auto"></div>
+</div>
+</div>
+<div class="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed-variant rounded-full text-[10px] font-bold" id="status-indicator">
+<span class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container animate-pulse"></span>
+                        VERIFIED
+                    </div>
+</div>
+<!-- Metrics Section -->
+<div class="space-y-4">
+<div class="flex justify-between items-end">
+<span class="text-label-sm font-label-sm text-on-surface-variant uppercase">OCR Quality</span>
+<span class="text-body-md font-bold text-secondary" id="ocr-value">99%</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-secondary transition-all duration-700" id="ocr-progress" style="width: 99%"></div>
+</div>
+<div class="pt-4 space-y-4 border-t border-outline-variant">
+<h4 class="text-label-md font-label-md text-on-surface uppercase">Risk Analysis</h4>
+<div class="flex items-start gap-3 p-3 bg-white/50 border border-outline-variant rounded">
+<span class="material-symbols-outlined text-on-tertiary-container" id="risk-icon-1">check_circle</span>
+<div>
+<p class="text-body-sm font-semibold text-on-surface leading-tight" id="risk-title-1">Vendor Matched</p>
+<p class="text-[11px] text-on-surface-variant">Validated against Master Vendor List</p>
+</div>
+</div>
+<div class="flex items-start gap-3 p-3 bg-white/50 border border-outline-variant rounded">
+<span class="material-symbols-outlined text-on-tertiary-container" id="risk-icon-2">payments</span>
+<div>
+<p class="text-body-sm font-semibold text-on-surface leading-tight" id="risk-title-2">Amount Threshold</p>
+<p class="text-[11px] text-on-surface-variant">Within standard recurring bounds</p>
+</div>
+</div>
+</div>
+</div>
+<div class="mt-auto space-y-2">
+<button class="w-full py-3 bg-secondary text-white font-label-md text-label-md rounded flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+                        Full Audit Trail
+                    </button>
+<button class="w-full py-3 border border-outline text-on-surface-variant font-label-md text-label-md rounded hover:bg-white transition-all">
+                        Download Report
+                    </button>
+</div>
+</div>
+</aside>
+</main>
+<script>
+        function updateHealthCheck(name, vendor, amount, status, ocr) {
+            const statusIndicator = document.getElementById('status-indicator');
+            const ocrValue = document.getElementById('ocr-value');
+            const ocrProgress = document.getElementById('ocr-progress');
+            const riskIcon1 = document.getElementById('risk-icon-1');
+            const riskTitle1 = document.getElementById('risk-title-1');
+            const riskIcon2 = document.getElementById('risk-icon-2');
+            const riskTitle2 = document.getElementById('risk-title-2');
+
+            // Update OCR
+            ocrValue.innerText = ocr + '%';
+            ocrProgress.style.width = ocr + '%';
+
+            // Update Status Badge
+            statusIndicator.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${status === 'Flagged' ? 'bg-error' : (status === 'Processing' ? 'bg-secondary' : 'bg-on-tertiary-container')} animate-pulse"></span>${status.toUpperCase()}`;
+            
+            if(status === 'Flagged') {
+                statusIndicator.className = "absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-error-container text-on-error-container rounded-full text-[10px] font-bold";
+                riskIcon1.innerText = "warning";
+                riskIcon1.className = "material-symbols-outlined text-error";
+                riskTitle1.innerText = "Low Confidence OCR";
+                
+                riskIcon2.innerText = "emergency";
+                riskIcon2.className = "material-symbols-outlined text-error";
+                riskTitle2.innerText = "Missing Signature";
+            } else if (status === 'Processing') {
+                statusIndicator.className = "absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-secondary-fixed text-on-secondary-fixed-variant rounded-full text-[10px] font-bold";
+                riskIcon1.innerText = "hourglass_empty";
+                riskIcon1.className = "material-symbols-outlined text-secondary";
+                riskTitle1.innerText = "Analyzing Layout";
+                
+                riskIcon2.innerText = "sync";
+                riskIcon2.className = "material-symbols-outlined text-secondary";
+                riskTitle2.innerText = "Tax ID Verification";
+            } else {
+                statusIndicator.className = "absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed-variant rounded-full text-[10px] font-bold";
+                riskIcon1.innerText = "check_circle";
+                riskIcon1.className = "material-symbols-outlined text-on-tertiary-container";
+                riskTitle1.innerText = "Vendor Matched";
+                
+                riskIcon2.innerText = "payments";
+                riskIcon2.className = "material-symbols-outlined text-on-tertiary-container";
+                riskTitle2.innerText = "Amount Threshold";
+            }
+        }
+    </script>
+</body></html>
