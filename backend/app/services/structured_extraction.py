@@ -165,13 +165,17 @@ def merge_extraction(final_text: str) -> Dict[str, Any]:
                             "source": "calculated",
                             "confidence": 1.0,
                         }
-                    elif abs(float(current_total) - expected_total) > 0.01:
-                        # Correct using python's sum + tax_amount
-                        merged["total_amount"] = {
-                            "value": expected_total,
-                            "source": "calculated_correction",
-                            "confidence": 1.0,
-                        }
+                    elif total_obj.get("source") != "regex":
+                        tax_val = merged.get("tax_amount", {}).get("value") or 0.0
+                        expected_with_tax = row_sum + float(tax_val)
+                        
+                        if abs(float(current_total) - row_sum) > 0.01 and abs(float(current_total) - expected_with_tax) > 0.01:
+                            # LLM made an addition mistake, correct it using python's sum
+                            merged["total_amount"] = {
+                                "value": expected_with_tax,
+                                "source": "calculated_correction",
+                                "confidence": 1.0,
+                            }
     except Exception as e:
         print(f"[Structured Extraction] Math fallback calculation error: {e}")
 

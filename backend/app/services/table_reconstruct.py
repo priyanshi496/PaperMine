@@ -33,7 +33,7 @@ def _cluster_1d(values: List[float], gap_threshold: float) -> List[List[float]]:
 def reconstruct_table_from_lines(
     lines: list,  # list[OcrLine]
     row_tolerance: float = 15,
-    col_gap_threshold: float = 40,
+    col_gap_threshold: float = 15,
 ) -> List[List[str]]:
     """
     Groups OcrLine boxes into rows (by y-center) and columns (by x-start
@@ -56,30 +56,32 @@ def reconstruct_table_from_lines(
         table_lines = lines
 
     # ── Step 2: Group rows by y-center ──
-    items = sorted(table_lines, key=lambda l: (l.box[1], l.box[0]))
-    rows, current_row, last_y = [], [], None
+    items = sorted(table_lines, key=lambda l: ((l.box[1] + l.box[3]) / 2, l.box[0]))
+    rows, current_row, row_y = [], [], None
     for line in items:
         y_center = (line.box[1] + line.box[3]) / 2
-        if last_y is not None and abs(y_center - last_y) > row_tolerance:
+        if row_y is not None and abs(y_center - row_y) > row_tolerance:
             rows.append(current_row)
             current_row = []
+            row_y = y_center
+        elif row_y is None:
+            row_y = y_center
         current_row.append(line)
-        last_y = y_center
     if current_row:
         rows.append(current_row)
 
     if len(rows) < 2:
         return []
 
-    # ── Step 3: Cluster x-starts for column boundaries ──
-    all_x_starts = [line.box[0] for row in rows for line in row]
-    col_clusters = _cluster_1d(all_x_starts, col_gap_threshold)
+    # ── Step 3: Cluster x-centers for column boundaries ──
+    all_x_centers = [(line.box[0] + line.box[2]) / 2 for row in rows for line in row]
+    col_clusters = _cluster_1d(all_x_centers, col_gap_threshold)
     col_boundaries = [min(c) for c in col_clusters]
 
-    def col_index_for(x: float) -> int:
+    def col_index_for(x_center: float) -> int:
         idx = 0
         for i, boundary in enumerate(col_boundaries):
-            if x >= boundary - 1:
+            if x_center >= boundary - 1:
                 idx = i
         return idx
 
@@ -88,7 +90,8 @@ def reconstruct_table_from_lines(
     for row in rows:
         row_cells = [""] * num_cols
         for line in row:
-            c = col_index_for(line.box[0])
+            x_center = (line.box[0] + line.box[2]) / 2
+            c = col_index_for(x_center)
             row_cells[c] = (row_cells[c] + " " + line.final_text).strip()
         grid.append(row_cells)
 

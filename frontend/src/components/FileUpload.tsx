@@ -5,6 +5,17 @@ import { UploadCloud, File, CheckCircle, AlertCircle, Loader2 } from "lucide-rea
 import axios from "axios";
 import { useRouter } from "next/navigation";
 
+const ALLOWED_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/tiff",
+  "image/bmp",
+  "image/webp",
+]);
+
+const ALLOWED_EXTENSIONS = ".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp";
+
 export default function FileUpload() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -17,9 +28,9 @@ export default function FileUpload() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
-      if (selectedFile.type !== "application/pdf") {
+      if (!ALLOWED_TYPES.has(selectedFile.type)) {
         setStatus("error");
-        setMessage("Only PDF files are allowed.");
+        setMessage("Unsupported file type. Allowed: PDF, JPEG, PNG, TIFF, BMP, WebP.");
         return;
       }
       setFile(selectedFile);
@@ -36,9 +47,9 @@ export default function FileUpload() {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type !== "application/pdf") {
+      if (!ALLOWED_TYPES.has(droppedFile.type)) {
         setStatus("error");
-        setMessage("Only PDF files are allowed.");
+        setMessage("Unsupported file type. Allowed: PDF, JPEG, PNG, TIFF, BMP, WebP.");
         return;
       }
       setFile(droppedFile);
@@ -92,7 +103,7 @@ export default function FileUpload() {
     <div className="w-full max-w-2xl mx-auto p-6 bg-white/50 backdrop-blur-xl rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100/50">
       <div className="text-center mb-8">
         <h2 className="text-2xl font-semibold text-gray-800 tracking-tight">Upload Document</h2>
-        <p className="text-sm text-gray-500 mt-2">Upload your PDF for parsing and analysis</p>
+        <p className="text-sm text-gray-500 mt-2">Upload your document or image for parsing and analysis</p>
       </div>
 
       <div
@@ -107,7 +118,7 @@ export default function FileUpload() {
           type="file"
           ref={fileInputRef}
           className="hidden"
-          accept=".pdf"
+          accept={ALLOWED_EXTENSIONS}
           onChange={handleFileChange}
           disabled={uploading}
         />
@@ -129,7 +140,7 @@ export default function FileUpload() {
             </div>
             <div>
               <p className="text-sm font-medium text-gray-700">Click to upload or drag and drop</p>
-              <p className="text-xs text-gray-400 mt-1">PDF files only (max 10MB)</p>
+              <p className="text-xs text-gray-400 mt-1">PDF, JPEG, PNG, TIFF, BMP, WebP (max 10MB)</p>
             </div>
           </div>
         )}
