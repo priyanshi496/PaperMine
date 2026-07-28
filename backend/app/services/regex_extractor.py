@@ -14,8 +14,8 @@ LABELS: Dict[str, List[str]] = {
     "place_of_supply": ["place of supply"],
     "hsn_sac": ["hsn", "sac", "hsn/sac", "hsn code"],
     "total_amount": [
-        "total", "grand total", "total amount", "amount payable", "invoice value",
-        "total invoice value", "net payable", "tota1", "tota", "totl",
+        "grand total", "total amount", "total invoice value", "invoice value",
+        "amount payable", "net payable", "total", "tota1", "tota", "totl",
     ],
     "taxable_value": ["taxable value", "taxable amount", "subtotal", "base amount"],
     "cgst_amount": ["cgst"],
@@ -94,8 +94,28 @@ def _find_value_near_label(text_norm: str, original_text: str, keywords: List[st
             # prefer the first match AFTER the label (values follow labels, not precede)
             label_end_in_snippet = match_kw.end() - start_idx
             after = [m for m in matches if m.start() >= label_end_in_snippet]
-            best_match = after[0] if after else matches[0]
-            return best_match
+            
+            # Avoid matching percentage rates (e.g. 5.00% or 18 percent) when extracting money/numeric amounts.
+            after_filtered = []
+            for m in after:
+                match_end = m.end()
+                rest = snippet[match_end:].strip()
+                if rest.startswith("%"):
+                    continue
+                after_filtered.append(m)
+            
+            if after_filtered:
+                # Prioritize matches starting with a currency symbol (₹, rs, inr)
+                currency_matches = [
+                    m for m in after_filtered
+                    if any(m.group(0).lower().startswith(cur) for cur in ("₹", "rs", "inr"))
+                ]
+                best_match = currency_matches[0] if currency_matches else after_filtered[0]
+                return best_match
+            elif after:
+                return after[0]
+            else:
+                return matches[0]
     return None
 
 

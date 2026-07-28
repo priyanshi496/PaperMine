@@ -154,16 +154,21 @@ def merge_extraction(final_text: str) -> Dict[str, Any]:
                     total_obj = merged.get("total_amount", {})
                     current_total = total_obj.get("value")
                     
+                    # Fetch tax amount if available to reconcile grand total
+                    tax_obj = merged.get("tax_amount", {})
+                    tax_val = tax_obj.get("value") or 0.0
+                    expected_total = row_sum + tax_val
+                    
                     if current_total is None:
                         merged["total_amount"] = {
-                            "value": row_sum,
+                            "value": expected_total,
                             "source": "calculated",
                             "confidence": 1.0,
                         }
-                    elif abs(float(current_total) - row_sum) > 0.01:
-                        # LLM made an addition mistake, correct it using python's sum
+                    elif abs(float(current_total) - expected_total) > 0.01:
+                        # Correct using python's sum + tax_amount
                         merged["total_amount"] = {
-                            "value": row_sum,
+                            "value": expected_total,
                             "source": "calculated_correction",
                             "confidence": 1.0,
                         }
