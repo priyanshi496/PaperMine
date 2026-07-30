@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Load environment variables from .env manually to avoid extra dependencies
 _env_loaded = False
@@ -67,6 +67,17 @@ def call_llm_structured_extraction(ocr_text: str) -> Optional[str]:
     """
     Sends the noisy raw OCR text to the LLM to return a clean structured JSON string
     matching the expected GST invoice fields.
+
+    IMPORTANT: temperature is pinned to 0. The prompt asks the model to make
+    judgment calls on ambiguous OCR characters (0 vs O, 1 vs I, etc.) and to
+    "reconstruct" garbled text. At non-zero temperature, the SAME document
+    can be extracted with a DIFFERENT invoice_number / GSTIN / amount on
+    different runs, because that reconstruction is sampled rather than
+    deterministic. Since invoice_number and GSTIN are then used as
+    effectively-primary-keys for matching, duplicate detection, and vendor
+    resolution, non-determinism here silently breaks all of those downstream.
+    temperature=0 doesn't remove OCR ambiguity, but it makes the model's
+    resolution of that ambiguity repeatable.
     """
     provider, client = get_llm_client()
     if not provider or not client:
@@ -153,15 +164,22 @@ Return ONLY the raw JSON block. No markdown explanation.
 
     try:
         if provider == "gemini":
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(temperature=0)
+            except Exception:
+                config = {"temperature": 0}
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=prompt
+                contents=prompt,
+                config=config
             )
             return response.text.strip()
         elif provider == "openai":
             model = os.environ.get("LLM_MODEL", "gpt-4o-mini" if not os.environ.get("OPENROUTER_API_KEY") else "google/gemini-2.5-flash")
             response = client.chat.completions.create(
                 model=model,
+                temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content.strip()
@@ -169,18 +187,100 @@ Return ONLY the raw JSON block. No markdown explanation.
         print(f"[LLM Service] Structured extraction failed: {e}")
     return None
 
+
+def call_llm_categorize_items(descriptions: List[str]) -> List[str]:
+    """
+    Batch-categorizes line-item descriptions into a small fixed taxonomy at
+    INGESTION time (once per invoice), so that spending-by-category queries
+    ("how much did I spend on coffee") become a deterministic SQL filter
+    instead of a live, non-deterministic LLM ID-matching call made fresh on
+    every user question. Runs once, cached in the DB — cheaper and stable.
+
+    Returns a list of category strings in the SAME order as `descriptions`.
+    Falls back to "Uncategorized" for every item if the LLM call fails, so
+    callers never get a length mismatch.
+    """
+    fallback = ["Uncategorized"] * len(descriptions)
+    if not descriptions:
+        return []
+
+    provider, client = get_llm_client()
+    if not provider or not client:
+        return fallback
+
+    numbered = "\n".join(f"{i}: {d}" for i, d in enumerate(descriptions))
+    prompt = f"""Categorize each of the following invoice line items into ONE short, consistent
+category label (e.g. "Beverages", "Snacks", "Bakery", "Main Course", "Software",
+"Office Supplies", "Travel", "Utilities", "Professional Services", "Other").
+
+Use the SAME category label every time for the same type of item across calls —
+consistency matters more than granularity. Prefer coarse, reusable categories
+over overly specific ones.
+
+Items (index: description):
+{numbered}
+
+Return ONLY a JSON object mapping each index (as a string) to its category label,
+no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
+
+    try:
+        raw = None
+        if provider == "gemini":
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(temperature=0)
+            except Exception:
+                config = {"temperature": 0}
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config
+            )
+            raw = response.text.strip().removeprefix("```json").removesuffix("```").strip()
+        elif provider == "openai":
+            model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+            response = client.chat.completions.create(
+                model=model_name,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            raw = response.choices[0].message.content.strip()
+
+        if not raw:
+            return fallback
+
+        mapping = json.loads(raw)
+        return [mapping.get(str(i), "Uncategorized") for i in range(len(descriptions))]
+    except Exception as e:
+        print(f"[LLM Service] Categorization failed: {e}")
+        return fallback
+
+
 def call_llm_assistant_intent(query: str, chat_history: list = None) -> Optional[dict]:
     """
     Classifies a user query into STRUCTURED (SQL) or SEMANTIC (RAG).
     Uses Ollama (Qwen3:8B) as primary — free, local, zero latency.
     Falls back to Gemini/OpenAI if Ollama is unavailable.
+
+    NOTE on accuracy: routing correctness gates everything downstream — a
+    misrouted aggregate question can't be fixed by anything later in the
+    pipeline. An 8B local model is materially weaker at precise multi-class
+    JSON routing than Gemini 2.5 Flash / GPT-4o-mini. If you're still seeing
+    routing errors after this patch, log which backend actually answered
+    each request (see the calling code in assistant.py) and compare
+    accuracy — you may want to make the stronger model primary for THIS
+    call specifically, even if Ollama stays primary for RAG generation.
     """
     load_env_file()
-    
+
+    # Widened from 2 to 6 turns to match call_llm_rag_answer's window, so
+    # pronoun/filter resolution ("what about that invoice?", "which one")
+    # has the same amount of context available in both calls.
     history_str = ""
     if chat_history:
         history_str = "--- PREVIOUS CONVERSATION CONTEXT ---\n" + "\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in chat_history[-2:]]
+            [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in chat_history[-6:]]
         ) + "\n-------------------------------------\n\n"
 
     prompt_text = f"""{history_str}--- CURRENT USER QUESTION ---
@@ -209,25 +309,37 @@ Use this for conversational chit-chat, greetings, or general financial knowledge
 - Examples: "Hi", "Hello", "What is GST?", "How does an invoice work?"
 - If the question is conversational or unclear, use GENERAL.
 
-## SQL Template Registry (Only if route == DATABASE)
-If DATABASE, choose all matching templates (can be multiple if compound question):
-- count_invoices          -> How many invoices total / uploaded?
-- verified_invoice_count  -> How many verified / approved invoices?
-- pending_invoice_count   -> How many pending / unverified invoices?
-- total_spending          -> Total spending / sum of invoice amounts
-- average_invoice_amount  -> Average / mean invoice amount
-- duplicate_count         -> How many duplicate invoices / alerts?
-- high_risk_invoices      -> How many high-risk / flagged invoices?
-- item_spending           -> Total spent on a specific item OR listing specific items (needs item_name filter, e.g., "foods and beverages")
-- invoice_items           -> List all line items purchased in a specific invoice (needs invoice_number filter)
-- invoice_due_date        -> When a specific invoice is due (needs invoice_number filter)
+## Query Plan (Only if route == DATABASE)
+If DATABASE, you must emit a `query_plan` object instead of generating raw SQL. The executor safely processes this plan.
+Schema:
+{{
+  "type": "aggregate" | "list",
+  "entity": "invoice" | "line_item" | "alert",
+  "filters": [
+      {{"field": "total_amount", "op": ">", "value": 1800}},
+      {{"field": "line_item.description", "op": "contains", "value": "coffee"}}
+  ],
+  "aggregate_fn": "sum" | "avg" | "count" | "min" | "max" | null,
+  "aggregate_field": "total_amount" | "amount" | null,
+  "group_by": "description" | null,
+  "sort_field": "total_amount" | null,
+  "sort_dir": "asc" | "desc" | null,
+  "limit": 1-50 | null,
+  "include_items": true | false
+}}
 
-## Filters
-Extract any metadata filters if explicitly mentioned IN THE CURRENT QUESTION.
-Do NOT carry over filters from the Previous Conversation (like `item_name`) unless the user's current question specifically refers to them (e.g., "what about last month?", "how much of that was taxes?").
+Supported Entities & Fields:
+- invoice: vendor_id, risk_score, verification_status, invoice_number, invoice_date, total_amount, tax_amount, line_item.description, line_item.category
+- line_item: description, category, amount
+- alert: alert_type, severity
+Supported Operators (op): >, <, >=, <=, ==, !=, contains
+
+## Filters (Top-level)
+Extract any metadata filters if explicitly mentioned IN THE CURRENT QUESTION (e.g. `vendor_name`, `invoice_number`). These act as global scopes outside the query plan.
+Do NOT carry over filters from the Previous Conversation unless explicitly referred to.
 
 Return a JSON object ONLY (no markdown, no explanation):
-{{"route": "DATABASE" | "DOCUMENT_SEARCH" | "GENERAL", "sql_templates": ["template_name_1"] | [], "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null, "item_name": null}}, "search_query": "Optimized semantic search string for FAISS or null"}}"""
+{{"route": "DATABASE" | "DOCUMENT_SEARCH" | "GENERAL", "query_plan": {{...}} | null, "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null, "item_name": null}}, "search_query": "Optimized semantic search string for FAISS or null"}}"""
 
     # --- Try Ollama first (local, free) ---
     from app.services.ollama_client import ollama_generate, ollama_is_available
@@ -246,34 +358,47 @@ Return a JSON object ONLY (no markdown, no explanation):
                 # Extract the first JSON object in the response
                 match = re.search(r"\{.*\}", raw, re.DOTALL)
                 if match:
-                    return json.loads(match.group())
+                    parsed = json.loads(match.group())
+                    parsed["_backend"] = "ollama"
+                    return parsed
         except Exception as e:
             print(f"[OllamaIntent] Error: {e}")
 
     # --- Fallback: Gemini / OpenAI ---
     provider, client = get_llm_client()
     if not provider or not client:
-        return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": ""}
+        return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": "", "_backend": "none"}
     try:
         if provider == "gemini":
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(temperature=0)
+            except Exception:
+                config = {"temperature": 0}
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=prompt_text
+                contents=prompt_text,
+                config=config
             )
             raw = response.text.strip().removeprefix("```json").removesuffix("```").strip()
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            parsed["_backend"] = "gemini"
+            return parsed
         elif provider == "openai":
             model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
             response = client.chat.completions.create(
                 model=model_name,
+                temperature=0,
                 messages=[{"role": "user", "content": prompt_text}],
                 response_format={"type": "json_object"}
             )
-            return json.loads(response.choices[0].message.content.strip())
+            parsed = json.loads(response.choices[0].message.content.strip())
+            parsed["_backend"] = "openai"
+            return parsed
     except Exception as e:
         print(f"[LLM Service] Assistant intent classification failed: {e}")
 
-    return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": ""}
+    return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": "", "_backend": "error_fallback"}
 
 def call_llm_rag_answer(query: str, context: str, chat_history: list = None) -> Optional[str]:
     """

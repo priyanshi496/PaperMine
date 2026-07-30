@@ -1,8 +1,28 @@
+import re
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db import models
 from app.services.llm_service import call_llm_assistant_intent, call_llm_rag_answer
 from app.services.vector_store import knowledge_engine
+from app.services.financial_utils import (
+    clean_amount,
+    normalize_invoice_number,
+    resolve_invoice_number,
+)
+from app.services.query_engine import execute_query_plan, format_query_result, QueryPlanError
+
+# Aggregate/quantitative phrasing that should NEVER be answered by RAG, even
+# if the intent classifier misroutes it. RAG over a handful of retrieved
+# chunks cannot correctly aggregate across documents — a wrong SQL template
+# is annoying, a fabricated total from RAG is actively dangerous for a
+# financial assistant. This is a deterministic safety net, not a replacement
+# for fixing classifier accuracy.
+_AGGREGATE_PATTERN = re.compile(
+    r"\b(total|how much|how many|count|average|highest|lowest|latest|oldest|"
+    r"pending|verified|duplicate|risk)\b",
+    re.IGNORECASE,
+)
+
 
 def run_assistant_query(db: Session, query: str, chat_history: list = None) -> dict:
     """
@@ -18,34 +38,77 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None) -> d
         
     route = intent_data.get("route", "DOCUMENT_SEARCH")
     filters = intent_data.get("filters", {})
+
+    # Log which backend actually classified this — lets you compare Ollama
+    # vs. the Gemini/OpenAI fallback's routing accuracy empirically instead
+    # of guessing. Swap print() for your real logger.
+    print(f"[Routing] backend={intent_data.get('_backend')} route={route} "
+          f"plan={intent_data.get('query_plan')} query={query!r}")
+
+    # Guardrail: if the classifier says DOCUMENT_SEARCH (or GENERAL) but the
+    # question is clearly an aggregate/count/total question with no query
+    # plan attached, don't let it fall through to RAG. Re-route to
+    # DATABASE with no plan so it hits the "no plan" branch below,
+    # which fails loudly with a clear message rather than silently
+    # hallucinating a number from retrieved text.
+    if route != "DATABASE" and _AGGREGATE_PATTERN.search(query) and not intent_data.get("query_plan"):
+        print(f"[Routing] Overriding misrouted aggregate question: {query!r} (was {route})")
+        route = "DATABASE"
     
     # Optional: convert vendor_name string filter to vendor_id
     vendor_id = None
     if filters.get("vendor_name"):
         v_name = filters["vendor_name"]
-        vendor = db.query(models.Vendor).filter(models.Vendor.name.ilike(f"%{v_name}%")).first()
-        if vendor:
-            vendor_id = vendor.id
+        matches = db.query(models.Vendor).filter(models.Vendor.name.ilike(f"%{v_name}%")).all()
+        if len(matches) == 1:
+            vendor_id = matches[0].id
             filters["vendor_id"] = vendor_id
+        elif len(matches) > 1:
+            # Ambiguous — don't silently guess which vendor was meant.
+            names = ", ".join(v.name for v in matches)
+            return {
+                "answer": f"I found multiple vendors matching '{v_name}': {names}. Could you clarify which one you mean?",
+                "sources": []
+            }
             
     if route == "DATABASE":
-        sql_templates = intent_data.get("sql_templates", [])
+        query_plan = intent_data.get("query_plan")
             
-        if sql_templates:
-            answers = []
-            sources = []
-            for tmpl in sql_templates:
-                ans = _execute_sql_template(db, tmpl, filters)
-                if ans:
-                    answers.append(ans)
-                    sources.append({"type": "SQL Database", "description": f"Executed template: {tmpl}"})
+        if query_plan:
+            # Inject top-level fuzzy invoice resolution into the plan
+            invoice_number = filters.get("invoice_number")
+            if invoice_number:
+                resolved_inv = _resolve_invoice_id(db, invoice_number, vendor_id)
+                if resolved_inv:
+                    # Guard against LLM emitting a single dict instead of a list
+                    if "filters" not in query_plan or not isinstance(query_plan["filters"], list):
+                        query_plan["filters"] = [query_plan["filters"]] if isinstance(query_plan.get("filters"), dict) else []
+                    
+                    query_plan["filters"].append({
+                        "field": "invoice_number", "op": "==", "value": resolved_inv.invoice_number
+                    })
+                else:
+                    return {"answer": f"No invoice found with number {invoice_number}.", "sources": []}
             
-            return {
-                "answer": "\n\n".join(answers) if answers else "I could not compute that from the structured data.",
-                "sources": sources
-            }
+            try:
+                res = execute_query_plan(db, query_plan, vendor_id)
+                ans = format_query_result(query_plan, res)
+                return {
+                    "answer": ans,
+                    "sources": [{"type": "SQL Database", "description": f"Executed Query Plan"}]
+                }
+            except QueryPlanError as e:
+                print(f"[Query Engine] Error executing plan: {e}")
+                route = "DOCUMENT_SEARCH"
         else:
-            route = "DOCUMENT_SEARCH" # fallback if no templates provided
+            # Previously silently fell through to DOCUMENT_SEARCH here —
+            # meaning any DATABASE-routed question the classifier didn't
+            # attach a template to would get answered by RAG instead, with
+            # no visibility into that happening. Now it's explicit and
+            # logged instead of silent.
+            print(f"[Routing] DATABASE route with no query plan for query={query!r} — "
+                  f"falling back to document search.")
+            route = "DOCUMENT_SEARCH"
             
     if route == "DOCUMENT_SEARCH":
         # 2. Semantic FAISS Retrieval
@@ -85,227 +148,23 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None) -> d
         }
 
 
-def _execute_sql_template(db: Session, template: str, filters: dict) -> str:
+def _resolve_invoice_id(db: Session, raw_invoice_number: str, vendor_id=None):
     """
-    Executes a safe predefined SQL template based on intent.
+    Resolves a possibly OCR-noisy user-supplied invoice number to the actual
+    stored Invoice row, using normalization + fuzzy matching against what's
+    actually in the DB, instead of a fixed O/0 substitution list. Returns
+    the Invoice object or None.
     """
-    vendor_id = filters.get("vendor_id")
-    invoice_number = filters.get("invoice_number")
+    if not raw_invoice_number:
+        return None
+    q = db.query(models.Invoice)
+    if vendor_id:
+        q = q.filter(models.Invoice.vendor_id == vendor_id)
+    all_invoices = q.all()
+    stored_numbers = [inv.invoice_number for inv in all_invoices if inv.invoice_number]
 
-    # --- COUNT templates ---
-    if template == "count_invoices":
-        q = db.query(models.Invoice)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        count = q.count()
-        return f"You have {count} invoice(s) in the system."
-
-    elif template == "verified_invoice_count":
-        q = db.query(models.Invoice).filter(models.Invoice.verification_status.ilike("verified"))
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        count = q.count()
-        return f"There are {count} verified invoice(s)."
-
-    elif template == "pending_invoice_count":
-        q = db.query(models.Invoice).filter(
-            (models.Invoice.verification_status == None) | 
-            (~models.Invoice.verification_status.ilike("verified"))
-        )
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        count = q.count()
-        return f"There are {count} unverified / pending invoice(s)."
-
-    elif template == "duplicate_count":
-        q = db.query(models.InsightAlert).filter(models.InsightAlert.alert_type == "Duplicate")
-        count = q.count()
-        return f"There are {count} duplicate invoice alert(s) in the system."
-
-    elif template == "high_risk_invoices":
-        q = db.query(models.Invoice).filter(models.Invoice.risk_score >= 5)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        count = q.count()
-        return f"There are {count} high-risk invoice(s) that require review."
-
-    # --- AGGREGATION templates ---
-    elif template == "item_spending":
-        item_name = filters.get("item_name")
-        if not item_name:
-            return "I need to know which specific item or category you're asking about to calculate spending."
-            
-        q = db.query(models.LineItem)
-        if vendor_id or invoice_number:
-            q = q.join(models.Invoice)
-            if vendor_id:
-                q = q.filter(models.Invoice.vendor_id == vendor_id)
-            if invoice_number:
-                q = q.filter(models.Invoice.invoice_number == invoice_number)
-            
-        all_items = q.all()
-        if not all_items:
-            return "There are no line items in the database to search through."
-            
-        # Semantic filtering via LLM
-        from app.services.llm_service import call_llm_rag_answer
-        items_context = "\n".join([f"ID: {it.id} | Name: {it.description}" for it in all_items])
-        prompt = (
-            f"The user is asking for their spending on '{item_name}'. "
-            "Look at the provided items context. Which items logically fall under this category or name? "
-            "IMPORTANT: Reply with ONLY a comma-separated list of the numeric IDs (e.g., 1, 4, 5). "
-            "Do NOT include the names of the items. If nothing matches, reply with NONE."
-        )
-        llm_response = call_llm_rag_answer(prompt, items_context, [])
-        
-        matched_ids = []
-        if llm_response and "NONE" not in llm_response.upper():
-            import re
-            matched_ids = [int(x) for x in re.findall(r'\d+', llm_response)]
-            
-        if not matched_ids:
-            return f"You haven't spent anything on '{item_name}' (or it isn't listed in the indexed invoices)."
-            
-        total = 0.0
-        item_groups = {} # description -> {"total": 0.0, "count": 0}
-        
-        for item in all_items:
-            if item.id in matched_ids:
-                try:
-                    clean_amt = str(item.amount).replace("₹", "").replace("Rs", "").replace(",", "").strip()
-                    val = float(clean_amt)
-                    total += val
-                    
-                    desc = item.description.strip()
-                    if desc not in item_groups:
-                        item_groups[desc] = {"total": 0.0, "count": 0}
-                    item_groups[desc]["total"] += val
-                    item_groups[desc]["count"] += 1
-                except (ValueError, TypeError):
-                    continue
-                    
-        if not item_groups:
-            return f"I found items for '{item_name}', but couldn't parse their monetary amounts."
-            
-        breakdown = []
-        for desc, stats in item_groups.items():
-            breakdown.append(f"- {desc}: ₹{stats['total']:,.2f} ({stats['count']} purchase{'s' if stats['count'] > 1 else ''})")
-            
-        breakdown_str = "\n".join(breakdown)
-        return f"### Spending on '{item_name}'\n\n**Total Spent:** ₹{total:,.2f}\n\n**Individual Items:**\n{breakdown_str}"
-
-    elif template == "total_spending":
-        q = db.query(models.Invoice)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        total = sum(float(inv.total_amount or 0) for inv in q.all())
-        return f"Your total spending across all invoices is ₹{total:,.2f}."
-
-    elif template == "average_invoice_amount":
-        q = db.query(models.Invoice)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        invoices = q.all()
-        if not invoices:
-            return "No invoices found to calculate an average."
-        avg = sum(float(inv.total_amount or 0) for inv in invoices) / len(invoices)
-        return f"Your average invoice amount is ₹{avg:,.2f}."
-
-    elif template == "highest_invoice_amount":
-        q = db.query(models.Invoice)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        invoices = q.all()
-        if not invoices:
-            return "No invoices found."
-        best = max(invoices, key=lambda inv: float(inv.total_amount or 0))
-        return f"Your highest invoice amount is ₹{float(best.total_amount):,.2f} (Invoice No: {best.invoice_number})."
-
-    elif template == "lowest_invoice_amount":
-        q = db.query(models.Invoice)
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        invoices = [inv for inv in q.all() if inv.total_amount]
-        if not invoices:
-            return "No invoices found."
-        best = min(invoices, key=lambda inv: float(inv.total_amount or 0))
-        return f"Your lowest invoice amount is ₹{float(best.total_amount):,.2f} (Invoice No: {best.invoice_number})."
-
-    # --- DATE templates ---
-    elif template == "latest_invoice":
-        q = db.query(models.Invoice).order_by(models.Invoice.created_at.desc())
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        inv = q.first()
-        if not inv:
-            return "No invoices found."
-        return f"Your latest invoice is No. {inv.invoice_number} for ₹{float(inv.total_amount or 0):,.2f}, uploaded on {inv.created_at.strftime('%d %b %Y') if inv.created_at else 'unknown date'}."
-
-    elif template == "oldest_invoice":
-        q = db.query(models.Invoice).order_by(models.Invoice.created_at.asc())
-        if vendor_id:
-            q = q.filter(models.Invoice.vendor_id == vendor_id)
-        inv = q.first()
-        if not inv:
-            return "No invoices found."
-        return f"Your oldest invoice is No. {inv.invoice_number} for ₹{float(inv.total_amount or 0):,.2f}, uploaded on {inv.created_at.strftime('%d %b %Y') if inv.created_at else 'unknown date'}."
-
-    # --- VENDOR/SPECIFIC templates ---
-    elif template == "vendor_spending":
-        if not vendor_id:
-            return "Please specify a vendor name to look up their spending."
-        q = db.query(models.Invoice).filter(models.Invoice.vendor_id == vendor_id)
-        total = sum(float(inv.total_amount or 0) for inv in q.all())
-        vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
-        name = vendor.name if vendor else "that vendor"
-        return f"Total spending for {name} is ₹{total:,.2f}."
-
-    elif template == "invoice_by_number":
-        if not invoice_number:
-            return "Please specify an invoice number to look up."
-        inv = db.query(models.Invoice).filter(models.Invoice.invoice_number == invoice_number).first()
-        if not inv:
-            return f"No invoice found with number {invoice_number}."
-        return (
-            f"Invoice {inv.invoice_number}: "
-            f"Amount ₹{float(inv.total_amount or 0):,.2f}, "
-            f"Status: {inv.verification_status or 'pending'}, "
-            f"Risk Score: {inv.risk_score or 0}."
-        )
-
-    elif template == "invoice_items":
-        if not invoice_number:
-            return "Please specify an invoice number to list its items."
-        inv = db.query(models.Invoice).filter(models.Invoice.invoice_number == invoice_number).first()
-        if not inv:
-            return f"No invoice found with number {invoice_number}."
-        items = db.query(models.LineItem).filter(models.LineItem.invoice_id == inv.id).all()
-        if not items:
-            return f"No line items found for invoice {invoice_number}."
-        
-        breakdown = []
-        for item in items:
-            amt = float(str(item.amount).replace(",", "").replace("₹", "").replace("Rs", "").strip()) if item.amount else 0.0
-            breakdown.append(f"- {item.description}: ₹{amt:,.2f}")
-        breakdown_str = "\n".join(breakdown)
-        return f"### Items for Invoice {invoice_number}\n\n{breakdown_str}"
-
-    elif template == "invoice_due_date":
-        if not invoice_number:
-            return "Please specify an invoice number to check its due date."
-        inv = db.query(models.Invoice).filter(models.Invoice.invoice_number == invoice_number).first()
-        if not inv:
-            return f"No invoice found with number {invoice_number}."
-        if inv.due_date:
-            try:
-                # Try to parse string to date object, assuming YYYY-MM-DD
-                from datetime import datetime
-                due_date_obj = datetime.strptime(inv.due_date, '%Y-%m-%d')
-                return f"Invoice {invoice_number} is due on {due_date_obj.strftime('%d %b %Y')}."
-            except ValueError:
-                return f"Invoice {invoice_number} is due on {inv.due_date}."
-        else:
-            return f"Invoice {invoice_number} does not have a specified due date."
-
-    return "I understood this was a structured query, but I don't have a template for it yet. Try rephrasing."
+    resolved = resolve_invoice_number(stored_numbers, raw_invoice_number)
+    if not resolved:
+        return None
+    return next((inv for inv in all_invoices if inv.invoice_number == resolved), None)
 

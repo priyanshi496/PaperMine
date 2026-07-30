@@ -1,6 +1,11 @@
 import json
 from sqlalchemy.orm import Session
 from app.db import models
+from app.services.financial_utils import (
+    clean_amount,
+    normalize_gstin,
+    normalize_invoice_number,
+)
 
 def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
     """
@@ -18,7 +23,15 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         return structured.get(key, {}).get("value")
 
     supplier_name = get_val("supplier_name")
-    supplier_gstin = get_val("supplier_gstin")
+
+    # Normalize GSTIN and invoice_number ONCE, right here, at the single
+    # point they enter the system. Every downstream read (vendor matching,
+    # duplicate detection, fraud checks, profile-chunk text, SQL lookups)
+    # uses this same canonical value, so a whitespace/case difference from
+    # OCR can no longer fragment a vendor into two DB rows or cause a
+    # duplicate invoice to slip through undetected.
+    supplier_gstin = normalize_gstin(get_val("supplier_gstin"))
+    invoice_number = normalize_invoice_number(get_val("invoice_number"))
     
     # 1. Fetch User
     user = None
@@ -90,9 +103,8 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         
     # 4. Duplicate Detection (File hash already computed at upload)
     fingerprint = doc.fingerprint
-        
-    invoice_number = get_val("invoice_number")
-    total_amount = get_val("total_amount")
+
+    total_amount = clean_amount(get_val("total_amount"))
     
     if vendor and invoice_number:
         past_invoices = db.query(models.Invoice).filter(
@@ -107,7 +119,15 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
             
             is_fraud = False
             for past_inv in past_invoices:
-                if str(past_inv.total_amount) != str(total_amount):
+                # Compare as normalized floats, not raw strings — "1000.0"
+                # vs "1000" or "1,000.00" would previously read as a fraud
+                # signal even though the amount is identical.
+                past_amt = clean_amount(past_inv.total_amount)
+                if past_amt is None or total_amount is None:
+                    if str(past_inv.total_amount) != str(total_amount):
+                        is_fraud = True
+                        break
+                elif abs(past_amt - total_amount) > 0.01:
                     is_fraud = True
                     break
             
@@ -143,7 +163,7 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         invoice_date=get_val("invoice_date"),
         due_date=None,
         total_amount=str(total_amount) if total_amount is not None else None,
-        tax_amount=str(get_val("tax_amount")) if get_val("tax_amount") is not None else None,
+        tax_amount=str(clean_amount(get_val("tax_amount"))) if clean_amount(get_val("tax_amount")) is not None else None,
         verification_status="Unverified",
         risk_score=0 # Will update after all checks
     )
@@ -165,6 +185,10 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
             ))
             
     if vendor and vendor.gstin and supplier_gstin:
+        # Both sides are already normalized (uppercase, whitespace-stripped)
+        # via normalize_gstin above, so this comparison no longer fires a
+        # false "OCR Confidence" / "Possible Fraud" alert on a pure
+        # case/whitespace difference — only on genuinely different GSTINs.
         if vendor.gstin != supplier_gstin:
             import difflib
             similarity = difflib.SequenceMatcher(None, vendor.gstin, supplier_gstin).ratio()
@@ -207,17 +231,20 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         new_trust = 100 - (vendor.compliance_issues * 5) - (vendor.duplicate_invoices * 10)
         vendor.trust_score = max(new_trust, 0)
         
-        if total_amount:
-            try:
-                amt_float = float(str(total_amount).replace(",", ""))
-                vendor.total_spent += int(amt_float)
-            except ValueError:
-                pass
+        if total_amount is not None:
+            # Previously: vendor.total_spent += int(amt_float) — this
+            # truncated every invoice's paise/decimal portion before
+            # accumulating, so vendor.total_spent silently drifted away
+            # from a fresh SUM(Invoice.total_amount) over time. Kept as a
+            # float now; round only for display, never for storage.
+            vendor.total_spent = (vendor.total_spent or 0) + total_amount
         db.commit()
 
     # 9. Line Items
     table_data = get_val("table")
     line_item_texts = []
+    pending_items = []  # (description, amount) pairs awaiting category assignment
+
     if table_data and len(table_data) > 1:
         headers = [str(h).lower() for h in table_data[0]]
         
@@ -235,15 +262,34 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
                 if len(row) > max(desc_idx, amount_idx):
                     desc = str(row[desc_idx])
                     amt = str(row[amount_idx])
+                    pending_items.append(desc)
                     line_item = models.LineItem(
                         invoice_id=invoice.id,
                         description=desc,
                         amount=amt,
-                        category="Uncategorized" 
+                        category=None  # filled in below via batch categorization
                     )
                     db.add(line_item)
                     line_item_texts.append(f"{desc}: {amt}")
             db.commit()
+
+    # Real categorization instead of hardcoding "Uncategorized" for every
+    # item. This is what lets item_spending() run as a deterministic SQL
+    # filter on `category` rather than re-deriving a matching ID set via a
+    # live LLM call on every user question (the source of inconsistent
+    # category-spending answers).
+    if pending_items:
+        from app.services.llm_service import call_llm_categorize_items
+        categories = call_llm_categorize_items(pending_items)
+        created_items = (
+            db.query(models.LineItem)
+            .filter(models.LineItem.invoice_id == invoice.id)
+            .order_by(models.LineItem.id.asc())
+            .all()
+        )
+        for item, category in zip(created_items, categories):
+            item.category = category or "Uncategorized"
+        db.commit()
 
     # 10. Two-Stage FAISS Embedding
     # Stage 1: Concise Document Profile (used for retrieval — finds the right invoice fast)
@@ -258,7 +304,7 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         f"PROFILE | {doc_type} | Invoice No: {invoice_number} | Vendor: {vendor_name}",
         f"Date: {get_val('invoice_date')} | Total: {total_amount}",
         f"Status: {invoice.verification_status or 'pending'} | Risk Score: {invoice.risk_score or 0}",
-        f"GSTIN: {get_val('supplier_gstin') or 'N/A'}",
+        f"GSTIN: {supplier_gstin or 'N/A'}",
         f"Category summary: {', '.join(set(t.split(':')[0].strip() for t in line_item_texts)) if line_item_texts else 'No items'}",
     ]
     profile_text = "\n".join(profile_parts)
@@ -290,9 +336,9 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         f"FULL INVOICE | Invoice No: {invoice_number}",
         f"Vendor: {vendor_name}",
         f"Vendor Address: {get_val('supplier_address') or 'N/A'}",
-        f"Supplier GSTIN: {get_val('supplier_gstin') or 'N/A'}",
+        f"Supplier GSTIN: {supplier_gstin or 'N/A'}",
         f"Buyer: {get_val('buyer_name') or 'N/A'}",
-        f"Buyer GSTIN: {get_val('buyer_gstin') or 'N/A'}",
+        f"Buyer GSTIN: {normalize_gstin(get_val('buyer_gstin')) or 'N/A'}",
         f"Invoice Date: {get_val('invoice_date') or 'N/A'}",
         f"Document Type: {doc_type}",
         "",
