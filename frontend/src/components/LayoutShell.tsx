@@ -35,7 +35,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   return (
     <div className="flex h-screen w-full">
       <Sidebar />
-      <div className="flex-1 flex flex-col pl-[260px] h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col pl-[280px] h-screen overflow-hidden">
         <TopHeader />
         <main className="flex-1 overflow-y-auto bg-background">
           {children}

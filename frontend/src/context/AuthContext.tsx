@@ -9,7 +9,7 @@ interface AuthState {
   user: {
     id: number;
     email: string;
-    role: "admin" | "vendor";
+    role: "admin" | "vendor" | "cfo" | "finance_manager" | "finance_executive";
     vendor_id: number | null;
   } | null;
 }
@@ -35,19 +35,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (savedToken && savedUser) {
       try {
         setAuthState({ token: savedToken, user: JSON.parse(savedUser) });
+        axios.defaults.headers.common["Authorization"] = `Bearer ${savedToken}`;
       } catch (e) {}
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    const interceptor = axios.interceptors.request.use((config) => {
-      if (authState.token) {
-        config.headers.Authorization = `Bearer ${authState.token}`;
-      }
-      return config;
-    });
-
+    // Only keep response interceptor for automatic logout on 401
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
@@ -59,19 +54,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     return () => {
-      axios.interceptors.request.eject(interceptor);
       axios.interceptors.response.eject(responseInterceptor);
     };
-  }, [authState]);
+  }, []);
 
   const login = (token: string, user: any) => {
     localStorage.setItem("papermine_token", token);
     localStorage.setItem("papermine_user", JSON.stringify(user));
+    axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
     setAuthState({ token, user });
   };
 
   const logout = () => {
     localStorage.removeItem("papermine_token");
+    localStorage.removeItem("papermine_user");
+    delete axios.defaults.headers.common["Authorization"];
     localStorage.removeItem("papermine_user");
     setAuthState({ token: null, user: null });
     router.push("/login");

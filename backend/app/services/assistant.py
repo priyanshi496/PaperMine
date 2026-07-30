@@ -11,6 +11,12 @@ from app.services.financial_utils import (
 )
 from app.services.query_engine import execute_query_plan, format_query_result, QueryPlanError
 
+# Questions that need an LLM to narrate the SQL results, not just dump the raw list.
+_INSIGHT_PATTERN = re.compile(
+    r"\b(trend|pattern|recommend|unusual|anomal|review|insight|analysis|frequent|most|compare|explain|why|risk)\b",
+    re.IGNORECASE,
+)
+
 # Aggregate/quantitative phrasing that should NEVER be answered by RAG, even
 # if the intent classifier misroutes it. RAG over a handful of retrieved
 # chunks cannot correctly aggregate across documents — a wrong SQL template
@@ -24,7 +30,7 @@ _AGGREGATE_PATTERN = re.compile(
 )
 
 
-def run_assistant_query(db: Session, query: str, chat_history: list = None) -> dict:
+def run_assistant_query(db: Session, query: str, chat_history: list = None, vendor_id: int = None) -> dict:
     """
     Main entry point for the Hybrid Assistant.
     """
@@ -91,11 +97,24 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None) -> d
                     return {"answer": f"No invoice found with number {invoice_number}.", "sources": []}
             
             try:
-                res = execute_query_plan(db, query_plan, vendor_id)
-                ans = format_query_result(query_plan, res)
+                db_result = execute_query_plan(db, query_plan, vendor_id=vendor_id)
+                formatted_data = format_query_result(query_plan, db_result)
+
+                # For analytical questions, feed the raw data to the LLM for a
+                # proper narrated answer instead of returning a terse list.
+                if _INSIGHT_PATTERN.search(query):
+                    narrated = call_llm_rag_answer(
+                        query,
+                        f"Here is the structured financial data from the database:\n\n{formatted_data}",
+                        chat_history
+                    )
+                    ans = narrated if narrated else raw_answer
+                else:
+                    ans = raw_answer
+
                 return {
                     "answer": ans,
-                    "sources": [{"type": "SQL Database", "description": f"Executed Query Plan"}]
+                    "sources": [{"type": "SQL Database", "description": "Executed Query Plan"}]
                 }
             except QueryPlanError as e:
                 print(f"[Query Engine] Error executing plan: {e}")
@@ -113,7 +132,23 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None) -> d
     if route == "DOCUMENT_SEARCH":
         # 2. Semantic FAISS Retrieval
         search_query = intent_data.get("search_query") or query
-        docs = knowledge_engine.semantic_search(db, search_query, top_k=5, filters=filters)
+        # If a specific invoice was resolved (from coreference or explicit mention),
+        # prepend the invoice number to the search query to bias FAISS toward the right chunk.
+        resolved_invoice = filters.get("invoice_number")
+        if resolved_invoice and resolved_invoice not in search_query:
+            search_query = f"invoice {resolved_invoice} {search_query}"
+
+        # For broad "all invoices", "compare all", "summarize all" queries expand
+        # top_k to retrieve all available chunks so no invoice is missed.
+        _ALL_PATTERN = re.compile(r"\b(all|every|each|compare all|summarize all|finance report|monthly report)\b", re.IGNORECASE)
+        top_k = 20 if _ALL_PATTERN.search(query) else 5
+
+        # Vendor isolation for RAG
+        search_filters = filters.copy()
+        if vendor_id:
+            search_filters["vendor_id"] = vendor_id
+
+        docs = knowledge_engine.semantic_search(db, search_query, top_k=top_k, filters=search_filters)
         
         if not docs:
             return {"answer": "I couldn't find any relevant documents in the knowledge base.", "sources": []}
@@ -141,7 +176,7 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None) -> d
         
     elif route == "GENERAL":
         # Direct LLM call with no RAG or DB
-        answer = call_llm_rag_answer(query, "No additional context needed. Answer from your general knowledge as PaperMine.", chat_history)
+        answer = call_llm_rag_answer(query, "No additional context needed.", chat_history, is_general=True)
         return {
             "answer": answer,
             "sources": []

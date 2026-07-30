@@ -105,6 +105,21 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
     fingerprint = doc.fingerprint
 
     total_amount = clean_amount(get_val("total_amount"))
+    subtotal = clean_amount(get_val("taxable_value"))
+    tax_amount = clean_amount(get_val("tax_amount"))
+    
+    # Mathematical Consistency Check
+    if total_amount is not None and subtotal is not None and tax_amount is not None:
+        if abs((subtotal + tax_amount) - total_amount) > 2.0: # Allow small rounding
+            risk_score += 5
+            db.add(models.InsightAlert(
+                document_id=document_id,
+                alert_type="Math Error",
+                severity="high",
+                message=f"Mathematical inconsistency detected.",
+                explanation=f"Subtotal (₹{subtotal}) + Tax (₹{tax_amount}) = ₹{subtotal + tax_amount}, but Grand Total is ₹{total_amount}. Potential tampering.",
+                confidence_score=100
+            ))
     
     if vendor and invoice_number:
         past_invoices = db.query(models.Invoice).filter(
@@ -258,19 +273,63 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
                 amount_idx = idx
                 
         if desc_idx != -1 and amount_idx != -1:
+            # For price spike detection
+            if vendor:
+                past_items = db.query(models.LineItem).join(models.Invoice).filter(
+                    models.Invoice.vendor_id == vendor.id
+                ).all()
+            else:
+                past_items = []
+                
             for row in table_data[1:]:
                 if len(row) > max(desc_idx, amount_idx):
                     desc = str(row[desc_idx])
-                    amt = str(row[amount_idx])
+                    amt_str = str(row[amount_idx])
+                    
+                    qty_idx = next((i for i, h in enumerate(headers) if "qty" in h or "quantity" in h), -1)
+                    qty = 1.0
+                    if qty_idx != -1 and len(row) > qty_idx:
+                        try:
+                            qty = float(str(row[qty_idx]).replace(',', ''))
+                        except:
+                            pass
+                            
+                    amt = clean_amount(amt_str) or 0.0
+                    unit_price = amt / qty if qty > 0 else amt
+                    
+                    # Price spike detection
+                    if vendor and unit_price > 0:
+                        # Find past identical items
+                        similar_past = [it for it in past_items if it.description and it.description.lower() == desc.lower()]
+                        if similar_past:
+                            # Check for 30%+ spike
+                            past_prices = []
+                            for p_it in similar_past:
+                                p_amt = clean_amount(p_it.amount) or 0.0
+                                # simplistic qty assumption for past items (if we didn't store qty, assume 1, though not ideal)
+                                # A better check would be against historical unit prices, but this is a good heuristic.
+                                past_prices.append(p_amt)
+                            
+                            avg_past = sum(past_prices) / len(past_prices)
+                            if avg_past > 0 and amt > (avg_past * 1.3):
+                                db.add(models.InsightAlert(
+                                    document_id=document_id,
+                                    alert_type="Price Spike",
+                                    severity="medium",
+                                    message=f"Price spike detected for item: {desc}",
+                                    explanation=f"This item was billed at ₹{amt:,.2f}, which is significantly higher than historical average (₹{avg_past:,.2f}).",
+                                    confidence_score=85
+                                ))
+
                     pending_items.append(desc)
                     line_item = models.LineItem(
                         invoice_id=invoice.id,
                         description=desc,
-                        amount=amt,
+                        amount=amt_str,
                         category=None  # filled in below via batch categorization
                     )
                     db.add(line_item)
-                    line_item_texts.append(f"{desc}: {amt}")
+                    line_item_texts.append(f"{desc}: {amt_str}")
             db.commit()
 
     # Real categorization instead of hardcoding "Uncategorized" for every

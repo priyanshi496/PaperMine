@@ -9,7 +9,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    role = Column(String, default="vendor") # admin, vendor
+    role = Column(String, default="vendor") # admin, vendor, finance_executive, finance_manager, cfo
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
     
     vendor = relationship("Vendor", foreign_keys=[vendor_id], back_populates="users")
@@ -57,6 +57,7 @@ class Vendor(Base):
     bank_account = Column(String, nullable=True)
     ifsc = Column(String, nullable=True)
     address = Column(String, nullable=True)
+    department = Column(String, nullable=True) # E.g., IT, HR, Admin, Cafeteria
     
     is_verified = Column(Integer, default=0) # boolean 0 or 1
     last_updated_at = Column(DateTime, default=datetime.utcnow)
@@ -102,12 +103,19 @@ class Invoice(Base):
     invoice_date = Column(String, nullable=True)
     due_date = Column(String, nullable=True)
     
-    total_amount = Column(String, nullable=True)  # Keeping as string initially to allow parsing safety, or float
+    subtotal = Column(String, nullable=True)
     tax_amount = Column(String, nullable=True)
+    total_amount = Column(String, nullable=True)  # Keeping as string initially to allow parsing safety, or float
+    
+    department = Column(String, nullable=True) # Extracted from vendor or explicitly set
     
     payment_status = Column(String, default="Pending") # Pending, Paid, Overdue
-    verification_status = Column(String, default="Unverified") # Unverified, Verified, Disputed, Needs Manager Approval
+    verification_status = Column(String, default="Unverified") # Unverified, Verified, Disputed, Needs Manager Approval, Approved, Rejected
     risk_score = Column(Integer, default=0) # 0-10
+    
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     document = relationship("Document", foreign_keys=[document_id], back_populates="invoices")
     vendor = relationship("Vendor", back_populates="invoices")

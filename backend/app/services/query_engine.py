@@ -52,10 +52,13 @@ INVOICE_SQL_FIELDS = {
     "vendor_id": (models.Invoice.vendor_id, "number"),
     "risk_score": (models.Invoice.risk_score, "number"),
     "verification_status": (models.Invoice.verification_status, "text"),
+    "payment_status": (models.Invoice.payment_status, "text"),
     "invoice_number": (models.Invoice.invoice_number, "text"),
     "invoice_date": (models.Invoice.invoice_date, "text"),
+    "due_date": (models.Invoice.due_date, "text"),
+    "department": (models.Invoice.department, "text"),
 }
-INVOICE_AMOUNT_FIELDS = {"total_amount", "tax_amount"}  # handled in Python
+INVOICE_AMOUNT_FIELDS = {"total_amount", "tax_amount", "subtotal"}  # handled in Python
 
 LINE_ITEM_SQL_FIELDS = {
     "description": (models.LineItem.description, "text"),
@@ -68,10 +71,24 @@ ALERT_SQL_FIELDS = {
     "severity": (models.InsightAlert.severity, "text"),
 }
 
+VENDOR_SQL_FIELDS = {
+    "name": (models.Vendor.name, "text"),
+    "gstin": (models.Vendor.gstin, "text"),
+    "is_verified": (models.Vendor.is_verified, "number"),
+    "trust_score": (models.Vendor.trust_score, "number"),
+    "total_spent": (models.Vendor.total_spent, "number"),
+    "duplicate_invoices": (models.Vendor.duplicate_invoices, "number"),
+    "compliance_issues": (models.Vendor.compliance_issues, "number"),
+    "department": (models.Vendor.department, "text"),
+    "bank_account": (models.Vendor.bank_account, "text"),
+    "ifsc": (models.Vendor.ifsc, "text"),
+}
+
 CROSS_FIELDS = {"line_item.description", "line_item.category"}  # only valid when entity == "invoice"
 
 ALLOWED_OPS = {">", "<", ">=", "<=", "==", "!=", "contains"}
 ALLOWED_AGG_FNS = {"sum", "avg", "count", "min", "max"}
+
 
 
 class QueryPlanError(Exception):
@@ -79,7 +96,7 @@ class QueryPlanError(Exception):
 
 
 def validate_plan(plan: Dict[str, Any]) -> None:
-    if plan.get("entity") not in ("invoice", "line_item", "alert"):
+    if plan.get("entity") not in ("invoice", "line_item", "alert", "vendor"):
         raise QueryPlanError(f"Unknown entity: {plan.get('entity')}")
     if plan.get("type") not in ("aggregate", "list"):
         raise QueryPlanError(f"Unknown query type: {plan.get('type')}")
@@ -107,6 +124,9 @@ def _field_lookup(entity: str, field: str):
     elif entity == "alert":
         if field in ALERT_SQL_FIELDS:
             return "sql", ALERT_SQL_FIELDS[field][0]
+    elif entity == "vendor":
+        if field in VENDOR_SQL_FIELDS:
+            return "sql", VENDOR_SQL_FIELDS[field][0]
     raise QueryPlanError(f"Field '{field}' is not allowed for entity '{entity}'")
 
 
@@ -158,7 +178,11 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
     entity = plan["entity"]
 
     # --- Base query + vendor scoping ---
-    if entity == "invoice":
+    if entity == "vendor":
+        q = db.query(models.Vendor)
+        if vendor_id:
+            q = q.filter(models.Vendor.id == vendor_id)
+    elif entity == "invoice":
         q = db.query(models.Invoice)
         if vendor_id:
             q = q.filter(models.Invoice.vendor_id == vendor_id)
@@ -317,15 +341,31 @@ def format_query_result(plan: Dict[str, Any], result: Dict[str, Any]) -> str:
     for r in rows:
         if entity == "invoice":
             amt = clean_amount(r.total_amount) or 0.0
-            lines.append(f"- Invoice **{r.invoice_number}**: ₹{amt:,.2f}")
+            tax = clean_amount(r.tax_amount) or 0.0
+            lines.append(
+                f"- Invoice **{r.invoice_number}** | Date: {r.invoice_date or 'N/A'}"
+                f" | Due: {r.due_date or 'N/A'}"
+                f" | Dept: {r.department or 'N/A'}"
+                f" | Status: {r.payment_status or 'N/A'} / {r.verification_status or 'N/A'}"
+                f" | Sub: ₹{(clean_amount(r.subtotal) or 0.0):,.2f} | Tax: ₹{tax:,.2f} | Total: ₹{amt:,.2f}"
+            )
             if r.id in result.get("items_by_invoice", {}):
                 for it in result["items_by_invoice"][r.id]:
                     item_amt = clean_amount(it.amount) or 0.0
-                    lines.append(f"    - {it.description}: ₹{item_amt:,.2f}")
+                    lines.append(f"    - {it.description} ({it.category or 'Uncategorized'}): ₹{item_amt:,.2f}")
         elif entity == "line_item":
             amt = clean_amount(r.amount) or 0.0
-            lines.append(f"- {r.description}: ₹{amt:,.2f}")
+            lines.append(f"- {r.description} ({r.category or 'Uncategorized'}): ₹{amt:,.2f}")
         elif entity == "alert":
-            lines.append(f"- [{r.alert_type}] {r.message}")
+            lines.append(f"- [{r.alert_type}] [{r.severity}] {r.message}")
+        elif entity == "vendor":
+            lines.append(
+                f"- **{r.name}** | GSTIN: {r.gstin or 'N/A'}"
+                f" | Trust Score: {r.trust_score or 'N/A'}"
+                f" | Total Spent: ₹{r.total_spent or 0:,.2f}"
+                f" | Verified: {'Yes' if r.is_verified else 'No'}"
+                f" | Duplicates: {r.duplicate_invoices or 0}"
+                f" | Compliance Issues: {r.compliance_issues or 0}"
+            )
 
     return "\n".join(lines)

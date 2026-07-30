@@ -35,7 +35,25 @@ def get_llm_client():
     global _gemini_client, _openai_client
     load_env_file()
 
-    # 1. Google Gemini (New SDK)
+    # --- 1. NVIDIA NIM (GPT-OSS-120B) - HIGHEST PRIORITY ---
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key:
+        if _openai_client is None:
+            try:
+                from openai import OpenAI
+                # Using openai client pointing to NVIDIA's endpoint
+                _openai_client = OpenAI(
+                    base_url="https://integrate.api.nvidia.com/v1",
+                    api_key=nvidia_key
+                )
+                os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b" # Force nemotron-3-super-120b-a12b
+            except Exception as e:
+                print(f"[LLM Service] NVIDIA init error: {e}")
+        if _openai_client:
+            return "openai", _openai_client
+    # -----------------------------------------------------------
+
+    # 2. Google Gemini (New SDK)
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if gemini_key:
         if _gemini_client is None:
@@ -47,7 +65,7 @@ def get_llm_client():
         if _gemini_client:
             return "gemini", _gemini_client
 
-    # 2. OpenAI or OpenRouter
+    # 3. OpenAI or OpenRouter
     openai_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if openai_key:
         if _openai_client is None:
@@ -292,79 +310,165 @@ def call_llm_assistant_intent(query: str, chat_history: list = None) -> Optional
 You must classify the user's query into exactly one of these three routes:
 
 ### 1. DATABASE
-Use this for math, exact counts, aggregations, or querying structured status across all documents.
-- The question asks for a pure aggregate number or total across invoices.
-- Keywords: count, how many, total spending, average amount, highest invoice, lowest invoice, latest invoice, oldest invoice, pending count, verified count, duplicate count, high-risk count
-- The question asks "how much did I spend on [item]?" (e.g., "how much did I spend on coffee")
-- The question asks to LIST items, expenses, or line items from the database (e.g., "individual prices with names", "list the items I bought") -> *We use DATABASE so we can query the items without RAG hallucinating math*.
+Use for ANY structured data lookup, aggregation, filtering, or counting. This covers:
+- **Counts:** "how many invoices", "count of items"
+- **Aggregations:** total, sum, average, highest, lowest, min, max spending
+- **Filters:** invoices from May, verified invoices, invoices over ₹1500
+- **Sorting:** latest invoice, oldest, chronological order, by amount
+- **Status checks:** payment_status (Pending/Paid), verification_status (Verified/Unverified)
+- **Item/spend lookups:** "how much on coffee", "which invoice has Hot Coffee", "total on sandwiches"
+- **Vendor profile:** trust score, GSTIN, total_spent, how many invoices submitted
+- **Fraud/alerts:** duplicate invoices, GST mismatches, fraud alerts, risk scores
+- **Spending analysis:** purchasing trends, most frequent items, spending by category
+- **Hybrid:** verified invoices containing coffee, invoices over ₹1500 with French Fries
 
 ### 2. DOCUMENT_SEARCH
-Use this ONLY for reading textual information, summarizing, or finding specific terms within the documents.
-- The question asks about document text content: payment terms, bank details, addresses, vendor contacts, signatures.
-- The question asks to summarize a specific invoice by number.
-- The question asks why a specific document was flagged.
+Use ONLY for reading rich text that requires the actual invoice document, not structured fields:
+- Summarize a specific invoice (needs full text: line items with qty, unit price, GST breakdown)
+- Payment terms, bank details, IFSC code, billing address, shipping address
+- Supplier or buyer contact information
+- Whether invoice is signed or has a stamp
+- Explain why an invoice is risky (full fraud context from document)
+- Compare two specific invoices in a table (needs both documents)
+- Which invoice contains a specific product (if the product text is not in DB)
 
 ### 3. GENERAL
-Use this for conversational chit-chat, greetings, or general financial knowledge that DOES NOT require looking up the user's invoices.
-- Examples: "Hi", "Hello", "What is GST?", "How does an invoice work?"
-- If the question is conversational or unclear, use GENERAL.
+Use ONLY for:
+- Greetings, chitchat ("Hi", "Thanks", "How are you")
+- General financial knowledge NOT tied to uploaded invoices ("What is GST?", "How does an invoice work?")
 
-## Query Plan (Only if route == DATABASE)
-If DATABASE, you must emit a `query_plan` object instead of generating raw SQL. The executor safely processes this plan.
+---
+
+## Query Plan (REQUIRED when route == DATABASE)
+
+Emit a `query_plan` object. The executor safely handles this — you never write SQL.
+
 Schema:
 {{
   "type": "aggregate" | "list",
-  "entity": "invoice" | "line_item" | "alert",
+  "entity": "invoice" | "line_item" | "alert" | "vendor",
   "filters": [
-      {{"field": "total_amount", "op": ">", "value": 1800}},
-      {{"field": "line_item.description", "op": "contains", "value": "coffee"}}
+      {{"field": "...", "op": "...", "value": "..."}}
   ],
   "aggregate_fn": "sum" | "avg" | "count" | "min" | "max" | null,
-  "aggregate_field": "total_amount" | "amount" | null,
-  "group_by": "description" | null,
-  "sort_field": "total_amount" | null,
+  "aggregate_field": "total_amount" | "tax_amount" | "amount" | null,
+  "group_by": "description" | "category" | null,
+  "sort_field": "total_amount" | "invoice_date" | "tax_amount" | null,
   "sort_dir": "asc" | "desc" | null,
-  "limit": 1-50 | null,
+  "limit": integer | null,
   "include_items": true | false
 }}
 
-Supported Entities & Fields:
-- invoice: vendor_id, risk_score, verification_status, invoice_number, invoice_date, total_amount, tax_amount, line_item.description, line_item.category
-- line_item: description, category, amount
-- alert: alert_type, severity
+### Supported Entities & Fields:
+
+**entity: invoice**
+- invoice_number (text), invoice_date (text, format YYYY-MM-DD), due_date (text), payment_status (text: "Pending"/"Paid"), verification_status (text: "Verified"/"Unverified"), risk_score (number), vendor_id (number), total_amount (amount), tax_amount (amount)
+- Cross-filters (only with invoice entity): line_item.description (contains), line_item.category (contains)
+
+**entity: line_item**
+- description (text), category (text), amount (amount)
+
+**entity: alert**
+- alert_type (text: "Duplicate"), severity (text: "medium"/"high")
+
+**entity: vendor**
+- name (text), gstin (text), trust_score (number), total_spent (number), is_verified (number), duplicate_invoices (number), compliance_issues (number)
+
 Supported Operators (op): >, <, >=, <=, ==, !=, contains
 
-## Filters (Top-level)
-Extract any metadata filters if explicitly mentioned IN THE CURRENT QUESTION (e.g. `vendor_name`, `invoice_number`). These act as global scopes outside the query plan.
-Do NOT carry over filters from the Previous Conversation unless explicitly referred to.
+### Routing Examples with Query Plans:
+
+| Question | route | entity | type | filters | agg_fn | sort | include_items |
+|---|---|---|---|---|---|---|---|
+| How many invoices? | DATABASE | invoice | aggregate | [] | count | null | false |
+| List all invoices | DATABASE | invoice | list | [] | null | invoice_date desc | false |
+| Invoices from May 2026 | DATABASE | invoice | list | [invoice_date contains "2026-05"] | null | null | false |
+| Latest invoice | DATABASE | invoice | list | [] | null | invoice_date desc | false | limit 1 |
+| Oldest invoice | DATABASE | invoice | list | [] | null | invoice_date asc | false | limit 1 |
+| Total spending | DATABASE | invoice | aggregate | [] | sum | total_amount | null | false |
+| Highest invoice | DATABASE | invoice | list | [] | null | total_amount desc | false | limit 1 |
+| Unverified invoices | DATABASE | invoice | list | [verification_status == "Unverified"] | null | null | false |
+| Pending invoices | DATABASE | invoice | list | [payment_status == "Pending"] | null | null | false |
+| Invoices over ₹1500 | DATABASE | invoice | list | [total_amount > 1500] | null | null | false |
+| Which invoice has Hot Coffee? | DATABASE | invoice | list | [line_item.description contains "Hot Coffee"] | null | null | true |
+| Total spent on coffee | DATABASE | line_item | aggregate | [description contains "coffee"] | sum | amount | null | false |
+| Items in invoice 001 | DATABASE | line_item | list | [] | null | null | false | (invoice_number in top-level filters) |
+| Most frequent item | DATABASE | line_item | aggregate | [] | count | null | description | false |
+| Spending by category | DATABASE | line_item | aggregate | [] | sum | amount | category | false |
+| Show all alerts | DATABASE | alert | list | [] | null | null | false |
+| Duplicate invoices | DATABASE | alert | list | [alert_type == "Duplicate"] | null | null | false |
+| Vendor profile | DATABASE | vendor | list | [] | null | null | false |
+| My GSTIN | DATABASE | vendor | list | [] | null | null | false |
+| Trust score | DATABASE | vendor | list | [] | null | null | false |
+| Verified invoices with coffee | DATABASE | invoice | list | [verification_status == "Verified", line_item.description contains "coffee"] | null | null | true |
+| Invoices >₹1500 with French Fries | DATABASE | invoice | list | [total_amount > 1500, line_item.description contains "French Fries"] | null | null | true |
+| Spending trends / most purchased | DATABASE | line_item | aggregate | [] | sum | amount | description | false |
+| Highest coffee expense invoice | DATABASE | invoice | list | [line_item.description contains "coffee"] | null | total_amount desc | true | limit 1 |
+| Highest GST invoice | DATABASE | invoice | list | [] | null | tax_amount desc | false | limit 1 |
+| What taxes were applied? | DATABASE | invoice | list | [] | null | null | false |
+| Give me a financial summary of all invoices | DATABASE | invoice | list | [] | null | invoice_date asc | true |
+| Compare all invoices | DATABASE | invoice | list | [] | null | invoice_date asc | true |
+| Generate a monthly expense report | DATABASE | line_item | aggregate | [] | sum | amount | description | false |
+| Which vendor cost us the most? | DATABASE | vendor | list | [] | null | total_spent desc | false | limit 1 |
+| Which department spent the most? | DATABASE | invoice | aggregate | [] | sum | total_amount | department | false |
+| Compare Dell and Metro spending | DATABASE | invoice | aggregate | [] | sum | total_amount | vendor_id | false | (Narrated by LLM) |
+| Show invoices above ₹50,000 | DATABASE | invoice | list | [total_amount > 50000] | null | null | false |
+| Average invoice value | DATABASE | invoice | aggregate | [] | avg | total_amount | null | false |
+| Show monthly GST paid | DATABASE | invoice | aggregate | [] | sum | tax_amount | invoice_date | false |
+
+### ⚠️ DOCUMENT_SEARCH vs DATABASE disambiguation (critical):
+
+| Question | Correct Route | Reason |
+|---|---|---|
+| "What is the risk score?" | DATABASE | Fetches a number from DB |
+| "**Explain** the risk score / **Why** is it risky / **Explain why** invoice X got its score" | DOCUMENT_SEARCH | Needs document text to explain the reasons |
+| "What is the tax amount?" | DATABASE | Fetches tax_amount from DB |
+| "**What taxes were applied?** / what GST breakdown?" | DOCUMENT_SEARCH | Needs document text for CGST/SGST breakdown with rates |
+| "Compare invoice X and Y" | DOCUMENT_SEARCH | Needs both full documents for rich comparison |
+| "Compare **all** invoices" | DATABASE | Structured data comparison across all invoices |
+
+---
+
+## Filters (Top-level) — Coreference Resolution
+Extract metadata filters (`vendor_name`, `invoice_number`) by resolving the FULL conversational context, not just the current question.
+
+**CRITICAL RULES:**
+1. If the current question explicitly names an invoice or vendor → use that name.
+2. If the current question uses a pronoun or implicit reference ("it", "the invoice", "that one", "what items were purchased?", "who issued it?", "what was the total?") AND the previous conversation mentioned a specific invoice or vendor → **inherit that invoice_number / vendor_name as the filter**.
+3. Only set filters to null if NO entity can be resolved from the entire conversation history.
+
+**Example of correct coreference:**
+- Turn 1 user: "Summarize invoice OBH-2026-0002"
+- Turn 2 user: "What items were purchased?" → invoice_number should be "OBH-2026-0002" (inherited)
+- Turn 3 user: "Who issued it?" → invoice_number should still be "OBH-2026-0002" (inherited)
 
 Return a JSON object ONLY (no markdown, no explanation):
 {{"route": "DATABASE" | "DOCUMENT_SEARCH" | "GENERAL", "query_plan": {{...}} | null, "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null, "item_name": null}}, "search_query": "Optimized semantic search string for FAISS or null"}}"""
 
-    # --- Try Ollama first (local, free) ---
-    from app.services.ollama_client import ollama_generate, ollama_is_available
-    if ollama_is_available():
-        system = (
-            "You are a precise query router for a financial AI assistant. "
-            "Your ONLY job is to output a single valid JSON object with no extra text, "
-            "no thinking, no markdown fences."
-        )
-        try:
-            raw = ollama_generate(prompt_text, system=system, temperature=0.0)
-            if raw:
-                # Strip <think>...</think> blocks that Qwen3 may emit
-                import re
-                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-                # Extract the first JSON object in the response
-                match = re.search(r"\{.*\}", raw, re.DOTALL)
-                if match:
-                    parsed = json.loads(match.group())
-                    parsed["_backend"] = "ollama"
-                    return parsed
-        except Exception as e:
-            print(f"[OllamaIntent] Error: {e}")
+    # --- Try Ollama first (local, free) --- (COMMENTED OUT TO USE NVIDIA NIM)
+    # from app.services.ollama_client import ollama_generate, ollama_is_available
+    # if ollama_is_available():
+    #     system = (
+    #         "You are a precise query router for a financial AI assistant. "
+    #         "Your ONLY job is to output a single valid JSON object with no extra text, "
+    #         "no thinking, no markdown fences."
+    #     )
+    #     try:
+    #         raw = ollama_generate(prompt_text, system=system, temperature=0.0)
+    #         if raw:
+    #             # Strip <think>...</think> blocks that Qwen3 may emit
+    #             import re
+    #             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    #             # Extract the first JSON object in the response
+    #             match = re.search(r"\{.*\}", raw, re.DOTALL)
+    #             if match:
+    #                 parsed = json.loads(match.group())
+    #                 parsed["_backend"] = "ollama"
+    #                 return parsed
+    #     except Exception as e:
+    #         print(f"[OllamaIntent] Error: {e}")
 
-    # --- Fallback: Gemini / OpenAI ---
+    # --- Fallback: Gemini / OpenAI / NVIDIA ---
     provider, client = get_llm_client()
     if not provider or not client:
         return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": "", "_backend": "none"}
@@ -400,7 +504,7 @@ Return a JSON object ONLY (no markdown, no explanation):
 
     return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": "", "_backend": "error_fallback"}
 
-def call_llm_rag_answer(query: str, context: str, chat_history: list = None) -> Optional[str]:
+def call_llm_rag_answer(query: str, context: str, chat_history: list = None, is_general: bool = False) -> Optional[str]:
     """
     Generates a final RAG answer using retrieved document chunks as context.
     Uses Ollama (Qwen3:8B) as primary — free, local.
@@ -415,59 +519,120 @@ def call_llm_rag_answer(query: str, context: str, chat_history: list = None) -> 
             if role in ("user", "assistant"):
                 history_messages.append({"role": role, "content": msg["content"]})
 
-    system = """# SYSTEM ROLE
-You are PaperMine AI, an enterprise-grade Financial Intelligence Assistant.
-You are NOT a generic chatbot. You are an AI Finance Analyst helping businesses understand invoices, vendors, expenses, fraud risks and financial documents.
-You must always answer professionally, accurately and with evidence. Never hallucinate.
-If information is unavailable, explicitly say so.
+    if is_general:
+        system = """# SYSTEM ROLE
+You are PaperMine AI, a friendly and professional enterprise-grade Financial Intelligence Assistant.
+The user is just chatting with you, greeting you, or asking general questions.
+Respond politely, concisely, and naturally. Do not output invoice tables or markdown lists unless asked."""
+    else:
+        system = """# SYSTEM ROLE
+You are PaperMine AI, an enterprise-grade Financial Intelligence Assistant and Finance Analyst.
+You help businesses understand invoices, vendors, expenses, and fraud risks from their uploaded financial documents.
+You must always answer accurately, professionally, and with evidence from the provided context.
+NEVER hallucinate. NEVER invent values not present in the context. If something is missing, say so explicitly.
+
+---
 
 # RESPONSE STYLE
-- Always use markdown formatting
-- Use **bold** for important values (amounts, invoice numbers, vendor names)
+- Always use **markdown formatting**
+- Use **bold** for critical values: amounts (₹), invoice numbers, vendor names, statuses
 - Use ## and ### headings to organize sections
-- Use bullet points for lists
-- Use markdown tables whenever items or comparisons are involved
-- Never respond in a single paragraph
+- Use bullet lists for properties
+- Use **markdown tables** for: line items, comparisons, summaries, multi-invoice data
+- Never answer in a single unformatted paragraph
 
-# ITEM EXTRACTION RULES
-- Extract EVERY line item from the invoice. Never summarize into vague categories like "food items".
-- Always include: Item Name | Quantity | Unit Price | Total Amount
-- Preserve exact quantities, prices and item names
-- If an item appears across multiple invoices, list it under each invoice separately
+---
 
-# INVOICE SUMMARY FORMAT
-## Invoice Summary
-- **Invoice No:** ...
-- **Vendor:** ...
-- **Invoice Date:** ...
-- **Status:** ...
+# ANSWER FORMAT TEMPLATES
 
-### Financial Summary
-| Component | Amount |
+## For Invoice Summary Questions ("Summarize invoice X"):
+## Invoice Summary — [Invoice No]
+| Field | Value |
 |---|---|
-| Subtotal | ₹... |
-| **Grand Total** | **₹...** |
+| **Invoice No** | ... |
+| **Vendor** | ... |
+| **Invoice Date** | ... |
+| **Due Date** | ... |
+| **Payment Status** | ... |
+| **Verification Status** | ... |
+| **GSTIN** | ... |
 
-### Purchased Items
-| Item | Qty | Unit Price | Total |
+### Financial Breakdown
+| Component | Amount (₹) |
+|---|---|
+| Subtotal | ... |
+| CGST | ... |
+| SGST | ... |
+| **Grand Total** | **...** |
+
+### Line Items
+| Item | Qty | Unit Price (₹) | Total (₹) |
 |---|---|---|---|
 
 ### Risk Analysis
-- Risk Score: ...
-- Duplicate Check: ...
-- GST Validation: ...
+- **Risk Score:** ...
+- **Fraud Flags:** ...
+- **GST Validation:** ...
 
-# MULTIPLE INVOICES: Separate every invoice clearly. Never merge them.
+---
 
-# FRAUD ANALYSIS: Always explain WHY a document is flagged with specific reasons.
+## For Comparison Questions ("Compare invoice X and Y"):
+Use a side-by-side table:
+| Field | Invoice X | Invoice Y |
+|---|---|---|
+| Invoice No | ... | ... |
+| Date | ... | ... |
+| Total | ₹... | ₹... |
+| Tax | ₹... | ₹... |
+| Items | ... | ... |
+Then add a **Key Differences** section.
 
-# OCR ERRORS: OCR may confuse 1/I/l, 0/O, 5/S. Do not flag as fraud unless difference is significant.
+---
 
-# SOURCES: End every response with **Sources:** listing invoice numbers and document IDs referenced.
+## For Product/Item Search ("Which invoice contains Hot Coffee?"):
+List each invoice that contains the item:
+- **Invoice [No]** — [Item]: ₹[amount] — Date: [date]
 
-# STRICT RULE: Use ONLY information from the provided context chunks.
-If the context does not contain the answer, say: "I couldn't find this information in the indexed documents."
-Never invent missing values."""
+---
+
+## For Vendor Profile ("Tell me about OneBite Hapoli"):
+## Vendor Profile — [Vendor Name]
+| Field | Value |
+|---|---|
+| GSTIN | ... |
+| Trust Score | ... |
+| Verified | ... |
+| Total Spent | ₹... |
+
+---
+
+## For Fraud/Risk Explanation ("Why is invoice X risky?"):
+## Risk Analysis — Invoice [No]
+- **Risk Score:** ...
+- **Flags Detected:** (list each flag with specific reason)
+- **Recommendation:** ...
+
+---
+
+## For Spending Analysis ("What do I spend most on?", "Trends?"):
+Provide a ranked breakdown with totals, then give 2-3 actionable insights.
+
+---
+
+## For Finance Report / Summary of All Invoices:
+Provide a summary table, then spending breakdown, then recommendations.
+
+---
+
+# CRITICAL RULES
+1. Extract EVERY line item from the invoice. Never summarize into vague categories.
+2. Always include: Item | Qty | Unit Price | Total in the items table.
+3. For MULTIPLE invoices: separate each invoice clearly with its own section heading.
+4. For comparisons: always use a side-by-side table format.
+5. Preserve exact invoice numbers, dates, GSTINs, and amounts from the context.
+6. OCR may confuse 1/I/l, 0/O, 5/S — note this if flagging a discrepancy as fraud.
+7. If context does not contain the answer, say: "This information is not available in the indexed documents."
+8. Never invent values. Use ONLY the provided context chunks."""
 
     retrieval_instructions = """**Instructions for using retrieved chunks:**
 1. Read ALL chunks before answering. Do not answer from only the first chunk.
@@ -488,20 +653,20 @@ Never invent missing values."""
 
     messages = history_messages + [{"role": "user", "content": user_content}]
 
-    # --- Try Ollama first (local, free) ---
-    from app.services.ollama_client import ollama_chat, ollama_is_available
-    if ollama_is_available():
-        try:
-            import re
-            raw = ollama_chat(messages, system=system, temperature=0.3)
-            if raw:
-                # Strip <think>...</think> blocks that Qwen3 may emit in thinking mode
-                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-                return raw
-        except Exception as e:
-            print(f"[OllamaRAG] Error: {e}")
+    # --- Try Ollama first (local, free) --- (COMMENTED OUT TO USE NVIDIA NIM)
+    # from app.services.ollama_client import ollama_chat, ollama_is_available
+    # if ollama_is_available():
+    #     try:
+    #         import re
+    #         raw = ollama_chat(messages, system=system, temperature=0.3)
+    #         if raw:
+    #             # Strip <think>...</think> blocks that Qwen3 may emit in thinking mode
+    #             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    #             return raw
+    #     except Exception as e:
+    #         print(f"[OllamaRAG] Error: {e}")
 
-    # --- Fallback: Gemini / OpenAI ---
+    # --- Fallback: Gemini / OpenAI / NVIDIA ---
     provider, client = get_llm_client()
     if not provider or not client:
         return "I'm sorry, my language model is currently disconnected."

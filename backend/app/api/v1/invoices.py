@@ -39,8 +39,12 @@ def list_invoices(
             "id": inv.id,
             "document_id": inv.document_id,
             "invoice_number": inv.invoice_number,
+            "invoice_date": inv.invoice_date,
+            "department": inv.department or "Unassigned",
             "total_amount": inv.total_amount,
             "verification_status": inv.verification_status,
+            "payment_status": inv.payment_status or "Pending",
+            "risk_score": inv.risk_score or 0,
             "vendor_name": inv.vendor.name if inv.vendor else "Unknown"
         }
         for inv in invoices

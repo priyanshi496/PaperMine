@@ -19,15 +19,23 @@ def get_insights(
         query = query.join(models.Document).join(models.Invoice, models.Document.id == models.Invoice.document_id).filter(models.Invoice.vendor_id == current_user.vendor_id)
         
     alerts = query.order_by(models.InsightAlert.created_at.desc()).all()
-    return [{
-        "id": a.id, 
-        "document_id": a.document_id, 
-        "alert_type": a.alert_type, 
-        "severity": a.severity, 
-        "message": a.message, 
-        "resolved": bool(a.resolved), 
-        "created_at": a.created_at
-    } for a in alerts]
+    
+    result = []
+    for a in alerts:
+        inv = db.query(models.Invoice).filter(models.Invoice.document_id == a.document_id).first()
+        result.append({
+            "id": a.id, 
+            "document_id": a.document_id, 
+            "alert_type": a.alert_type, 
+            "severity": a.severity, 
+            "message": a.message,
+            "explanation": a.explanation,
+            "resolved": bool(a.resolved), 
+            "created_at": a.created_at,
+            "invoice_number": inv.invoice_number if inv else "Unknown",
+            "vendor_name": inv.vendor.name if inv and inv.vendor else "Unknown"
+        })
+    return result
 
 @router.post("/{alert_id}/resolve")
 def resolve_insight(alert_id: int, db: Session = Depends(get_db)):
