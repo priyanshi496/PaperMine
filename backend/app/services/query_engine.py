@@ -202,11 +202,15 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
     for f in plan.get("filters", []):
         kind, ref = _field_lookup(entity, f["field"])
         if kind == "sql":
-            _, value_type = (
+            field_tuple = (
                 INVOICE_SQL_FIELDS.get(f["field"]) or
                 LINE_ITEM_SQL_FIELDS.get(f["field"]) or
-                ALERT_SQL_FIELDS.get(f["field"])
+                ALERT_SQL_FIELDS.get(f["field"]) or
+                VENDOR_SQL_FIELDS.get(f["field"])
             )
+            if not field_tuple:
+                raise QueryPlanError(f"Field '{f['field']}' is not allowed for entity '{entity}'")
+            _, value_type = field_tuple
             q = _apply_sql_filter(q, ref, f["op"], f["value"], value_type)
         elif kind == "amount":
             amount_filters.append((ref, f["op"], f["value"]))
@@ -243,13 +247,13 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
 
         if agg_fn == "count":
             group_by = plan.get("group_by")
-            if group_by and entity == "line_item":
+            if group_by:
                 groups: Dict[str, Dict[str, Any]] = {}
                 for r in rows:
-                    key = getattr(r, group_by, "Unknown") or "Unknown"
+                    key = str(getattr(r, group_by, "Unknown") or "Unknown").strip()
                     groups.setdefault(key, {"count": 0})
-                    groups["count"] = groups[key]["count"] + 1  # noqa (kept simple)
-                return {"type": "aggregate", "fn": "count", "value": len(rows), "groups": None}
+                    groups[key]["count"] += 1
+                return {"type": "aggregate", "fn": "count", "value": len(rows), "groups": groups}
             return {"type": "aggregate", "fn": "count", "value": len(rows)}
 
         values = []
@@ -271,15 +275,15 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
         # Optional grouping for e.g. "spending on coffee, broken down by item"
         group_by = plan.get("group_by")
         groups_out = None
-        if group_by and entity == "line_item":
+        if group_by:
             groups: Dict[str, Dict[str, float]] = {}
             for r in rows:
-                val = get_amount(r, agg_field)
+                val = get_amount(r, agg_field) if agg_field in (INVOICE_AMOUNT_FIELDS | LINE_ITEM_AMOUNT_FIELDS) else getattr(r, agg_field, None)
                 if val is None:
                     continue
-                key = (getattr(r, group_by, None) or "Unknown").strip()
+                key = str(getattr(r, group_by, None) or "Unknown").strip()
                 groups.setdefault(key, {"total": 0.0, "count": 0})
-                groups[key]["total"] += val
+                groups[key]["total"] += float(val)
                 groups[key]["count"] += 1
             groups_out = groups
 
@@ -319,7 +323,11 @@ def format_query_result(plan: Dict[str, Any], result: Dict[str, Any]) -> str:
         skipped_note = f" _( {result['skipped']} record(s) had unparseable amounts and were excluded.)_" if result.get("skipped") else ""
 
         if fn == "count":
-            return f"Count: **{value}**"
+            base = f"Count: **{value}**"
+            if result.get("groups"):
+                lines = [f"- {k}: {v['count']} item(s)" for k, v in result["groups"].items()]
+                base += "\n\n**Breakdown:**\n" + "\n".join(lines)
+            return base
         if value is None:
             return "No matching records with a parseable amount were found."
 

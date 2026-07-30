@@ -6,11 +6,16 @@ import { useAuth } from "@/context/AuthContext";
 import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, User, Send, FileText, Search, BarChart3, ShieldAlert } from "lucide-react";
+import { Bot, User, Send, FileText, Search, BarChart3, ShieldAlert, Check, Copy, LineChart, TrendingUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from "framer-motion";
+
+import { usePageContext } from "@/context/PageContext";
 
 export default function CopilotPage() {
   const { authState, loading: authLoading } = useAuth();
@@ -20,7 +25,11 @@ export default function CopilotPage() {
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [selectedSource, setSelectedSource] = useState<any>(null);
+  const [loadingPhase, setLoadingPhase] = useState(0);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
+  const { setPageContext, pageContext } = usePageContext();
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
 
   const storageKey = `papermine_copilot_${(authState.user as any)?.id ?? "guest"}`;
@@ -50,42 +59,105 @@ export default function CopilotPage() {
     endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, loading]);
 
+  useEffect(() => {
+    let interval: any;
+    if (loading) {
+      setLoadingPhase(0);
+      interval = setInterval(() => {
+        setLoadingPhase((p) => (p < 3 ? p + 1 : p));
+      }, 800);
+    } else {
+      setLoadingPhase(0);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  const handleCopy = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(idx);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
   const handleSend = async (forcedQuery?: string) => {
     const textToSend = forcedQuery || query;
     if (!textToSend.trim()) return;
 
     const userMessage = { role: "user", content: textToSend, sources: [] };
-    setChatHistory((prev) => [...prev, userMessage]);
+    setChatHistory((prev) => [
+      ...prev,
+      userMessage,
+      { role: "assistant", content: "", sources: [] }
+    ]);
+    
+    // The index of the AI message we just pushed
+    const aiMessageIndex = chatHistory.length + 1;
+    
     setQuery("");
     setLoading(true);
 
     try {
-      const res = await axios.post(
-        "http://localhost:8000/api/v1/assistant/chat",
-        {
-          query: textToSend,
-          chat_history: chatHistory.map((m) => ({ role: m.role, content: m.content }))
+      const response = await fetch("http://localhost:8000/api/v1/assistant/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authState.token}`
         },
-        {
-          headers: {
-            Authorization: `Bearer ${authState.token}`
+        body: JSON.stringify({
+          query: textToSend,
+          chat_history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
+          frontend_context: pageContext
+        })
+      });
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const dataStr = line.substring(6).trim();
+            if (!dataStr) continue;
+            
+            try {
+              const data = JSON.parse(dataStr);
+              setChatHistory((prev) => {
+                const newHistory = [...prev];
+                const msg = { ...newHistory[aiMessageIndex] };
+                
+                if (data.sources) {
+                  msg.sources = data.sources;
+                }
+                if (data.chunk) {
+                  msg.content += data.chunk;
+                }
+                
+                newHistory[aiMessageIndex] = msg;
+                return newHistory;
+              });
+            } catch (e) {
+              console.error("Error parsing SSE data", dataStr, e);
+            }
           }
         }
-      );
-
-      const aiMessage = {
-        role: "assistant",
-        content: res.data.answer,
-        sources: res.data.sources || [],
-      };
-      setChatHistory((prev) => [...prev, aiMessage]);
+      }
     } catch (e: any) {
-      const errorMsg = {
-        role: "assistant",
-        content: "Sorry, I encountered an error. Please try again.",
-        sources: [],
-      };
-      setChatHistory((prev) => [...prev, errorMsg]);
+      setChatHistory((prev) => {
+        const newHistory = [...prev];
+        if (newHistory[aiMessageIndex]) {
+           newHistory[aiMessageIndex].content = "Sorry, I encountered an error. Please try again.";
+        }
+        return newHistory;
+      });
     } finally {
       setLoading(false);
     }
@@ -103,14 +175,37 @@ export default function CopilotPage() {
 
   if (authLoading || !hydrated) return null;
 
-  const suggestedPrompts = [
-    { icon: <BarChart3 className="w-5 h-5 text-blue-500" />, title: "Which vendor cost us the most this month?" },
-    { icon: <ShieldAlert className="w-5 h-5 text-red-500" />, title: "Show me all high-risk unverified invoices." },
-    { icon: <FileText className="w-5 h-5 text-emerald-500" />, title: "Summarize the latest invoice from Dell." },
-    { icon: <Search className="w-5 h-5 text-purple-500" />, title: "What products do we buy most from Metro?" },
+  const role = authState.user?.role || "vendor";
+
+  const PROMPTS = {
+    vendor: [
+      { icon: <BarChart3 className="w-5 h-5 text-blue-500" />, title: "Show my revenue this month." },
+      { icon: <ShieldAlert className="w-5 h-5 text-red-500" />, title: "Which of my invoices are pending?" },
+      { icon: <FileText className="w-5 h-5 text-emerald-500" />, title: "Summarize my latest invoice." },
+    ],
+    finance: [
+      { icon: <Search className="w-5 h-5 text-purple-500" />, title: "Show pending approvals." },
+      { icon: <ShieldAlert className="w-5 h-5 text-red-500" />, title: "Are there any GST mismatches?" },
+      { icon: <FileText className="w-5 h-5 text-amber-500" />, title: "Show all high-risk invoices." },
+    ],
+    cfo: [
+      { icon: <LineChart className="w-5 h-5 text-indigo-500" />, title: "Compare our top vendors." },
+      { icon: <TrendingUp className="w-5 h-5 text-emerald-500" />, title: "Generate a monthly spend report." },
+      { icon: <BarChart3 className="w-5 h-5 text-blue-500" />, title: "Why did IT spending increase?" },
+    ]
+  };
+
+  const suggestedPrompts = PROMPTS[role as keyof typeof PROMPTS] || PROMPTS.vendor;
+
+  const loadingMessages = [
+    "Thinking...",
+    "Querying Financial Database...",
+    "Searching Company Knowledge...",
+    "Combining Results..."
   ];
 
   return (
+    <>
     <div className="flex flex-col h-[calc(100vh-64px)] max-w-4xl mx-auto w-full">
       
       {/* Scrollable Chat Area */}
@@ -169,19 +264,61 @@ export default function CopilotPage() {
                     {msg.role === "user" ? (
                       <p className="text-[15px]">{msg.content}</p>
                     ) : (
-                      <div className="prose prose-sm dark:prose-invert max-w-none prose-tables:border-collapse prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:p-2 prose-td:border prose-td:border-border prose-td:p-2">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                        
-                        {msg.sources && msg.sources.length > 0 && (
-                          <div className="mt-4 pt-4 border-t border-border/50 flex flex-wrap gap-2">
-                            {msg.sources.map((src: any, i: number) => (
-                              <Badge key={i} variant="outline" className="text-[10px] bg-background">
-                                <FileText className="w-3 h-3 mr-1" />
-                                Document {src.document_id}
-                              </Badge>
-                            ))}
+                      <div className="group relative">
+                        <div className="prose prose-sm dark:prose-invert max-w-none prose-tables:border-collapse prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:p-2 prose-td:border prose-td:border-border prose-td:p-2">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                          
+                            {msg.sources && msg.sources.length > 0 && (
+                              <div className="mt-4 pt-4 border-t border-border/50 flex flex-wrap gap-2">
+                                {msg.sources.map((src: any, i: number) => (
+                                  <Badge 
+                                    key={i} 
+                                    variant="outline" 
+                                    className="text-[10px] bg-background cursor-pointer hover:bg-muted"
+                                    onClick={() => setSelectedSource(src)}
+                                  >
+                                    {src.type === "SQL Database" ? <BarChart3 className="w-3 h-3 mr-1 text-blue-500" /> : <FileText className="w-3 h-3 mr-1 text-emerald-500" />}
+                                    {src.type === "Business Document" ? src.filename : (src.type === "SQL Database" ? "SQL Database" : `Invoice Document ${src.document_id}`)}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+
+                            {idx === chatHistory.length - 1 && !loading && msg.content && (
+                              <div className="mt-4 pt-4 border-t border-border/50 flex flex-wrap gap-2">
+                                <p className="w-full text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1">Suggested Follow-ups</p>
+                                {["Explain the root cause", "Show supporting documents", "Compare with last month"].map((suggestion) => (
+                                  <Badge
+                                    key={suggestion}
+                                    variant="secondary"
+                                    className="text-[11px] cursor-pointer hover:bg-primary/20 text-primary bg-primary/10"
+                                    onClick={() => handleSend(suggestion)}
+                                  >
+                                    {suggestion}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                        {/* Copy Button */}
+                        {msg.content && (
+                          <div className="absolute -bottom-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  className="inline-flex shrink-0 items-center justify-center border bg-background hover:bg-accent hover:text-accent-foreground h-7 w-7 rounded-full shadow-sm"
+                                  onClick={() => handleCopy(msg.content, idx)}
+                                >
+                                  {copiedIndex === idx ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-muted-foreground" />}
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  <p className="text-[10px]">{copiedIndex === idx ? "Copied" : "Copy to clipboard"}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                         )}
                       </div>
@@ -196,10 +333,15 @@ export default function CopilotPage() {
                 <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
                   <Bot className="w-4 h-4" />
                 </div>
-                <div className="bg-muted/30 border border-border/50 rounded-2xl rounded-tl-sm px-5 py-4 flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"></div>
-                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="bg-muted/30 border border-border/50 rounded-2xl rounded-tl-sm px-5 py-4 flex items-center gap-3">
+                  <div className="flex gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <span className="text-[13px] font-medium text-muted-foreground animate-pulse">
+                    {loadingMessages[loadingPhase]}
+                  </span>
                 </div>
               </motion.div>
             )}
@@ -239,5 +381,26 @@ export default function CopilotPage() {
       </div>
 
     </div>
+
+      <Sheet open={!!selectedSource} onOpenChange={(open) => !open && setSelectedSource(null)}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader className="mb-6">
+            <SheetTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary" />
+              {selectedSource?.filename || "Source Document"}
+            </SheetTitle>
+            <SheetDescription>
+              {selectedSource?.type || "Document Chunk"}
+            </SheetDescription>
+          </SheetHeader>
+          
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {selectedSource?.text || ""}
+            </ReactMarkdown>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

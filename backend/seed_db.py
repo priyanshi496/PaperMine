@@ -53,8 +53,7 @@ for i, v in enumerate(vendors_data):
 print("Creating users...")
 users_to_create = [
     {"email": "cfo@technova.com", "role": "cfo", "vendor_id": None},
-    {"email": "manager@technova.com", "role": "finance_manager", "vendor_id": None},
-    {"email": "executive@technova.com", "role": "finance_executive", "vendor_id": None},
+    {"email": "finance@technova.com", "role": "finance_team", "vendor_id": None},
 ]
 for v_name, vendor in db_vendors.items():
     safe_name = v_name.split()[0].lower()
@@ -105,7 +104,7 @@ specific_invoices = [
             {"desc": "APC Back-UPS Pro BX1100LI-IN", "qty": 2, "rate": 9500, "amt": 19000, "cat": "Hardware"},
             {"desc": "Samsung T7 Shield 1TB SSD", "qty": 2, "rate": 12500, "amt": 25000, "cat": "Hardware"}
         ],
-        "status": "Pending", "risk": 0
+        "status": "Vendor Confirmed", "risk": 0
     },
     {
         "vendor_name": "METRO Wholesale India", "invoice_number": "MTR-2026-2001",
@@ -137,7 +136,7 @@ specific_invoices = [
             {"desc": "Cleaning Liquid 1L", "qty": 20, "rate": 95, "amt": 1900, "cat": "Supplies"},
             {"desc": "Tissue Boxes (100 Pulls)", "qty": 40, "rate": 55, "amt": 2200, "cat": "Supplies"}
         ],
-        "status": "Pending", "risk": 0
+        "status": "Vendor Confirmed", "risk": 0
     },
     {
         "vendor_name": "Office Depot India", "invoice_number": "ODI-2026-3001",
@@ -158,7 +157,7 @@ specific_invoices = [
             {"desc": "Desk Organizer", "qty": 8, "rate": 300, "amt": 2400, "cat": "Stationery"},
             {"desc": "Calculator (12 Digit)", "qty": 6, "rate": 550, "amt": 3300, "cat": "Stationery"}
         ],
-        "status": "Pending", "risk": 0
+        "status": "Vendor Confirmed", "risk": 0
     },
     {
         "vendor_name": "Office Depot India", "invoice_number": "ODI-2026-3003",
@@ -168,7 +167,7 @@ specific_invoices = [
             {"desc": "File Folder (A4)", "qty": 25, "rate": 25, "amt": 625, "cat": "Stationery"},
             {"desc": "Sticky Notes (3x3)", "qty": 20, "rate": 45, "amt": 900, "cat": "Stationery"}
         ],
-        "status": "Under Review", "risk": 2
+        "status": "Vendor Confirmed", "risk": 2
     }
 ]
 
@@ -203,13 +202,11 @@ def insert_invoice(data):
     ver_status = "Unverified"
     if data["status"] == "Paid":
         pay_status = "Paid"
-        ver_status = "Verified"
+        ver_status = "Paid"
     elif data["status"] == "Approved":
         ver_status = "Approved"
-    elif data["status"] == "Pending":
-        ver_status = "Verified" # Verified but pending payment
-    elif data["status"] == "Under Review":
-        ver_status = "Needs Manager Approval"
+    elif data["status"] == "Vendor Confirmed":
+        ver_status = "Vendor Confirmed"
     elif data["status"] == "Rejected":
         ver_status = "Rejected"
 
@@ -291,9 +288,9 @@ while total_generated < 45:
     tax = sub * 0.18
     tot = sub + tax
     
-    status = random.choice(["Paid", "Approved", "Pending", "Under Review", "Rejected"])
+    status = random.choice(["Paid", "Approved", "Vendor Confirmed", "Vendor Confirmed", "Rejected"])
     risk = 0
-    if status == "Under Review": risk = random.randint(3, 7)
+    if status == "Vendor Confirmed": risk = random.randint(3, 7)
     if status == "Rejected": risk = random.randint(7, 10)
     
     data = {
@@ -314,7 +311,7 @@ data = {
     "vendor_name": "OneBite Hapoli", "invoice_number": "OBH-2026-9999",
     "date": "2026-06-01", "due": "2026-06-15", "subtotal": "5000", "tax": "900", "total": "5900",
     "items": [{"desc": "Team Lunch", "qty": 1, "rate": 5000, "amt": 5000, "cat": "Food"}],
-    "status": "Under Review", "risk": 8
+    "status": "Vendor Confirmed", "risk": 8
 }
 doc1, inv1 = insert_invoice(data)
 # duplicate insertion
@@ -336,7 +333,7 @@ data_gst = {
     "vendor_name": "FreshFarm Dairy", "invoice_number": "FRM-2026-5555",
     "date": "2026-06-02", "due": "2026-06-16", "subtotal": "2000", "tax": "360", "total": "2360",
     "items": [{"desc": "Milk 1L", "qty": 30, "rate": 65, "amt": 1950, "cat": "Dairy"}],
-    "status": "Under Review", "risk": 7
+    "status": "Vendor Confirmed", "risk": 7
 }
 doc3, inv3 = insert_invoice(data_gst)
 # Fake the FAISS chunk to have a wrong GSTIN
@@ -358,7 +355,7 @@ data_bank = {
     "vendor_name": "METRO Wholesale India", "invoice_number": "MTR-2026-6666",
     "date": "2026-06-03", "due": "2026-06-17", "subtotal": "8000", "tax": "1440", "total": "9440",
     "items": [{"desc": "Supplies", "qty": 1, "rate": 8000, "amt": 8000, "cat": "Supplies"}],
-    "status": "Under Review", "risk": 8
+    "status": "Vendor Confirmed", "risk": 8
 }
 doc4, inv4 = insert_invoice(data_bank)
 wrong_bank_chunk = f"FULL INVOICE | Invoice No: MTR-2026-6666\nVendor: METRO Wholesale India\nGSTIN: 27AAACM1234N1Z5\nInvoice Date: 2026-06-03\nBank Details: SCB0999999, IFSC: SCBL0000001\nRisk Score: 8\n--- LINE ITEMS ---\nSupplies | Qty: 1 | Rate: 8000 | Amount: 8000\n--- TOTALS ---\nSubtotal: 8000\nTotal GST: 1440\nGrand Total: 9440\n"
@@ -373,7 +370,29 @@ db.add(InsightAlert(
     confidence_score=99
 ))
 db.commit()
-
+# 5.5 Insert Business Context Documents
+print("Inserting Business Context Documents...")
+import os
+docs_dir = os.path.join(os.path.dirname(__file__), "data", "business_docs")
+if os.path.exists(docs_dir):
+    for filename in os.listdir(docs_dir):
+        if filename.endswith(".md"):
+            with open(os.path.join(docs_dir, filename), "r") as f:
+                content = f.read()
+            doc = Document(filename=filename, status="processed", extraction_method="business_memo")
+            db.add(doc)
+            db.commit()
+            db.refresh(doc)
+            
+            chunk = DocumentChunk(
+                document_id=doc.id, 
+                vendor_id=None, 
+                document_type="business_memo", 
+                chunk_text=f"BUSINESS CONTEXT DOCUMENT | File: {filename}\n{content}"
+            )
+            db.add(chunk)
+            db.commit()
+            print(f"Inserted {filename} into DB.")
 
 # 6. Rebuild FAISS index
 print(f"Rebuilding FAISS index with {len(documents_to_embed)} chunks...")

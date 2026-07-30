@@ -11,20 +11,32 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, DollarSign, FileText, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
+import { AlertTriangle, TrendingUp, Search, Clock, FileText, CheckCircle2, ShieldCheck, DollarSign, Bot } from "lucide-react";
+import { format } from "date-fns";
+import { usePageContext } from "@/context/PageContext";
 
 export default function VendorIntelligence() {
   const { authState, loading: authLoading } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { setPageContext } = usePageContext();
 
   useEffect(() => {
     if (!authLoading && authState.token) {
-      fetchDashboardData();
+      fetchVendorData();
     }
   }, [authLoading, authState.token]);
 
-  const fetchDashboardData = async () => {
+  useEffect(() => {
+    if (authState.user) {
+      setPageContext({
+        page: "Vendor Intelligence",
+        entity: { type: "vendor", id: authState.user.id }
+      });
+    }
+  }, [authState.user, setPageContext]);
+
+  const fetchVendorData = async () => {
     try {
       setLoading(true);
       const res = await axios.get("http://localhost:8000/api/v1/dashboard/overview");

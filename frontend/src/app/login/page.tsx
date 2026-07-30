@@ -97,7 +97,8 @@ export default function LoginPage() {
         <div className="mt-8 border-t border-outline-variant pt-6 text-center">
             <p className="text-[11px] font-mono text-on-surface-variant mb-2">TEST ACCOUNTS</p>
             <div className="text-[12px] text-on-surface-variant space-y-1 bg-surface-container-low p-3 rounded text-left font-mono">
-                <p>Admin: admin@papermine.com / admin123</p>
+                <p>CFO: cfo@technova.com / cfo123</p>
+                <p>Finance Team: finance@technova.com / finance123</p>
                 <p>Vendor: onebitehapoli@vendor.com / vendor123</p>
             </div>
         </div>

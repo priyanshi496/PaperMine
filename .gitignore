@@ -3,17 +3,40 @@ backend/venv/
 frontend/node_modules/
 frontend/.next/
 
+# Python Cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+.coverage
+
+# Frontend Cache
+.eslintcache
+frontend/dist/
+frontend/build/
+
+# IDEs and Editors
+.vscode/
+.idea/
+
 # Environment and sensitive variables
 backend/.env
+.env
+.env.local
+.env.*
 
 # Local database and uploads
 backend/papermine.db
 backend/uploads/
+backend/chroma_db/
+backend/faiss_index/
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Temporary images
+# Temporary files
 backend/temp_page_*
 *.png
+

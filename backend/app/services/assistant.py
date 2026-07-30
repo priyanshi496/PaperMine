@@ -108,9 +108,9 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None, vend
                         f"Here is the structured financial data from the database:\n\n{formatted_data}",
                         chat_history
                     )
-                    ans = narrated if narrated else raw_answer
+                    ans = narrated if narrated else formatted_data
                 else:
-                    ans = raw_answer
+                    ans = formatted_data
 
                 return {
                     "answer": ans,
@@ -203,3 +203,125 @@ def _resolve_invoice_id(db: Session, raw_invoice_number: str, vendor_id=None):
         return None
     return next((inv for inv in all_invoices if inv.invoice_number == resolved), None)
 
+import json
+from app.services.llm_service import call_llm_rag_answer_stream
+
+async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=None, frontend_context=None, user_role=None, user_email=None):
+    """
+    Streaming version of run_assistant_query. Yields SSE events.
+    user_role: "vendor" | "finance_team" | "cfo" | "admin"
+    user_email: used to personalize greetings and vendor identification
+    """
+    intent_data = call_llm_assistant_intent(query, chat_history, frontend_context)
+    route = intent_data.get("route", "DOCUMENT_SEARCH")
+    filters = intent_data.get("filters", {})
+    
+    _INSIGHT_PATTERN = re.compile(r"\b(why|trend|reason|explain|analyze|break down|insight|highest|most)\b", re.IGNORECASE)
+
+    if route == "DATABASE":
+        query_plan = intent_data.get("query_plan")
+        if query_plan:
+            invoice_number = filters.get("invoice_number")
+            if invoice_number:
+                resolved_inv = _resolve_invoice_id(db, invoice_number, vendor_id)
+                if resolved_inv:
+                    if "filters" not in query_plan or not isinstance(query_plan["filters"], list):
+                        query_plan["filters"] = [query_plan["filters"]] if isinstance(query_plan.get("filters"), dict) else []
+                    query_plan["filters"].append({
+                        "field": "invoice_number", "op": "==", "value": resolved_inv.invoice_number
+                    })
+                else:
+                    yield f"data: {json.dumps({'sources': []})}\n\n"
+                    yield f"data: {json.dumps({'chunk': f'No invoice found with number {invoice_number}.'})}\n\n"
+                    return
+            try:
+                db_result = execute_query_plan(db, query_plan, vendor_id=vendor_id)
+                formatted_data = format_query_result(query_plan, db_result)
+
+                if _INSIGHT_PATTERN.search(query):
+                    # Also do a quick semantic search to grab business context memos
+                    search_filters = {}
+                    if vendor_id:
+                        search_filters["vendor_id"] = vendor_id
+                    docs = knowledge_engine.semantic_search(db, query, top_k=5, filters=search_filters)
+                    sources = [{'type': 'SQL Database', 'description': 'Executed Query Plan'}]
+                    context_parts = [f"Here is the structured financial data from the database:\n{formatted_data}"]
+                    
+                    for idx, doc in enumerate(docs):
+                        context_parts.append(f"--- Document {idx+1} (ID: {doc['document_id']}) ---\n{doc['text']}")
+                        filename = doc.get("filename") or f"Document {doc['document_id']}"
+                        is_memo = "BUSINESS CONTEXT DOCUMENT" in doc['text']
+                        sources.append({
+                            "type": "Business Document" if is_memo else "Invoice",
+                            "document_id": doc['document_id'],
+                            "filename": filename,
+                            "text": doc['text'],
+                            "relevance": f"{doc['distance']:.2f}"
+                        })
+                    
+                    yield f"data: {json.dumps({'sources': sources})}\n\n"
+                    context = "\n\n".join(context_parts)
+                    async for chunk in call_llm_rag_answer_stream(query, context, chat_history, is_general=False, frontend_context=frontend_context, user_role=user_role, user_email=user_email):
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'sources': [{'type': 'SQL Database', 'description': 'Executed Query Plan'}]})}\n\n"
+                    yield f"data: {json.dumps({'chunk': formatted_data})}\n\n"
+                return
+            except QueryPlanError as e:
+                print(f"[QueryPlanError] Falling back to RAG due to: {e}")
+                route = "DOCUMENT_SEARCH"
+        else:
+            route = "DOCUMENT_SEARCH"
+            
+    if route == "DOCUMENT_SEARCH":
+        search_query = intent_data.get("search_query") or query
+        resolved_invoice = filters.get("invoice_number")
+        if resolved_invoice and resolved_invoice not in search_query:
+            search_query = f"invoice {resolved_invoice} {search_query}"
+        
+        resolved_vendor = filters.get("vendor_name")
+        if resolved_vendor and resolved_vendor not in search_query:
+            search_query = f"{resolved_vendor} {search_query}"
+
+        _ALL_PATTERN = re.compile(r"\b(all|every|each|compare all|summarize all|finance report|monthly report)\b", re.IGNORECASE)
+        top_k = 20 if _ALL_PATTERN.search(query) else 5
+
+        search_filters = filters.copy()
+        if vendor_id:
+            search_filters["vendor_id"] = vendor_id
+
+        docs = knowledge_engine.semantic_search(db, search_query, top_k=top_k, filters=search_filters)
+        
+        if not docs:
+            yield f"data: {json.dumps({'sources': []})}\n\n"
+            yield f"data: {json.dumps({'chunk': 'I couldn\'t find any relevant documents in the knowledge base.'})}\n\n"
+            return
+            
+        context_parts = []
+        sources = []
+        for idx, doc in enumerate(docs):
+            context_parts.append(f"--- Document {idx+1} (ID: {doc['document_id']}) ---\n{doc['text']}")
+            filename = doc.get("filename") or f"Document {doc['document_id']}"
+            is_memo = "BUSINESS CONTEXT DOCUMENT" in doc['text']
+            
+            sources.append({
+                "type": "Business Document" if is_memo else "Invoice",
+                "document_id": doc['document_id'],
+                "filename": filename,
+                "text": doc['text'],
+                "relevance": f"{doc['distance']:.2f}"
+            })
+            
+        context = "\n\n".join(context_parts)
+        yield f"data: {json.dumps({'sources': sources})}\n\n"
+        
+        async for chunk in call_llm_rag_answer_stream(query, context, chat_history, is_general=False, frontend_context=frontend_context, user_role=user_role, user_email=user_email):
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        return
+        
+    elif route == "GENERAL":
+        yield f"data: {json.dumps({'sources': []})}\n\n"
+        async for chunk in call_llm_rag_answer_stream(query, "No additional context needed.", chat_history, is_general=True, frontend_context=frontend_context, user_role=user_role, user_email=user_email):
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        return
+    return

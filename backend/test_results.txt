@@ -1,0 +1,130 @@
+Logging in as CFO...
+Login successful!
+
+=====================================
+QUERY: Why did IT spending increase?
+=====================================
+TIME: 42.72s
+SOURCES: 6
+ANSWER:
+## Why IT Spending Increased  
+
+The increase in IT expenditure is driven by a **planned Q2 workstation refresh** that was approved in the IT procurement memo and reflected in the Q2 budget allocation.  
+
+### Evidence from the Documents  
+
+| Source | Key Information | Exact Figures (as stated) |
+|--------|----------------|---------------------------|
+| **Finance Monthly Report – April 2026** (Doc ID 52) | Forecasts a significant spike in IT CapEx for May due to the Q2 workstation refresh. | “Cash reserves are healthy and fully prepared to absorb the **₹28L projected IT spend**.” |
+| **IT Procurement Memo – May 2026** (Doc ID 50) | Details the approved workstation‑refresh program for the Engineering department. | **Approved Budget**: **₹28,00,000**<br>**Approved Procurement**:<br>• 20 Developer Laptops<br>• 10 High‑Resolution Monitors<br>• 20 Docking Stations |
+| **Q2 Budget Approval 2026** (Doc ID 56) | Sets the department‑level spending limits for Q2 (Apr‑Jun) 2026. | **IT Department Allocation**: **₹35,00,000** |
+| **Invoice Data** (retrieved chunks) | Shows numerous purchases matching the refresh items (e.g., Dell XPS 13 laptops, monitors, docking‑station‑related accessories) across multiple invoices in April‑May 2026. | Examples: <br>• Dell XPS 13 (Hardware) – multiple line items totalling > ₹4,000,000 across invoices DEL‑2026‑4025, 4028, 4042, 4031, 4044, 4037, 4043, etc.<br>• Webcam, Laptop Bag, Monitor, Keyboard, HDMI Cable – consistent with the refresh list. |
+
+### Summary  
+
+- The **IT department’s Q2 budget** was set at **₹35 Lakh**, providing the ceiling for spending.  
+- A **specific approved procurement** of **₹28 Lakh** for 20 laptops, 10 monitors, and 20 docking stations was authorized in May 2026.  
+- The finance report anticipated this spend, noting that cash reserves were prepared to absorb the **₹28 Lakh** projected IT outlay.  
+- Subsequent invoices reveal a high volume of Dell XPS 13 laptops, monitors, and related accessories, confirming that the refresh purchases are being executed.  
+
+**Therefore, the rise in IT spending is directly attributable to the approved Q2 workstation refresh program, which allocated a substantial budget for new laptops, monitors, and docking stations to replace aging hardware and support developer productivity.**
+
+=====================================
+QUERY: Why did Cafeteria spending decrease?
+=====================================
+TIME: 27.17s
+SOURCES: 5
+ANSWER:
+## Why Cafeteria Spending Decreased  
+
+**Source:** HR Circular – *New Hybrid Work Model* (Document ID: **51**)  
+
+- **Policy Update:** Starting **May 2026**, TechNova is shifting to a **hybrid work model**. Employees are expected in the office **3 days a week**.  
+- **Impact on Operations:** Due to the **reduced daily headcount** in the physical office, **weekly team lunches and cafeteria spending will be scaled down proportionally**.  
+- **Budget Adjustment:** The Cafeteria budget for **Q2** has been **revised to reflect lower daily consumption**. Vendors supplying fresh produce and dairy (e.g., FreshFarm, OneBite) received updated weekly quantity requirements.  
+
+### Summary  
+The decrease in cafeteria spending is directly attributable to the **hybrid work model**, which lowers the number of employees physically present each day, leading to a proportional reduction in food‑related expenses.  
+
+*(No contradictory information about the reason for the decrease is present in the retrieved invoices.)*
+
+=====================================
+QUERY: Should we continue working with Dell?
+=====================================
+TIME: 15.38s
+SOURCES: 1
+ANSWER:
+- **OneBite Hapoli** | GSTIN: 24ABCDE1234F1Z5 | Trust Score: 100 | Total Spent: ₹44,250.00 | Verified: Yes | Duplicates: 0 | Compliance Issues: 0
+
+=====================================
+QUERY: Should we continue working with Metro?
+=====================================
+TIME: 42.05s
+SOURCES: 5
+ANSWER:
+## Vendor Performance Review – Metro Cash & Carry  
+**Source:** Document 1 (vendor_review_metro.md)  
+
+| Evaluation Area | Findings |
+|-----------------|----------|
+| **Delivery** | Acceptable, but occasional delays in bulk supply drops. |
+| **Compliance Issues** | 2 discrepancies in HSN/SAC codes found in the previous quarter. |
+| **Cost Efficiency** | High – bulk pricing is **12 % below market average**. |
+| **Recommendation** | **Monitor.** Ensure finance flags any mismatched GST invoices for manual review. Maintain vendor for bulk supplies due to cost benefits, but strictly enforce compliance. |
+
+---
+
+## Invoice Evidence (Metro Wholesale India)  
+
+All invoices share the same GSTIN (**27AAACM1234N1Z5**) and vendor name, confirming they belong to Metro.
+
+| Invoice No. | Date | Department | Line Items (Qty × Rate = Amount) | Subtotal | Total GST | Grand Total | Risk Score |
+|-------------|------|------------|----------------------------------|----------|-----------|-------------|------------|
+| **MTR-2026-6666** | 2026‑06‑03 | – | Supplies × 1 @ ₹8000 = ₹8000 | ₹8000 | ₹1440 | **₹9440** | 8 |
+| **MET-2026-4016** | 2026‑04‑14 | Admin | Tea Bags × 4 @ ₹400 = ₹1600<br>Hand Wash × 1 @ ₹150 = ₹150 | ₹1750 | ₹315.0 | **₹2065.0** | 0 |
+| **MET-2026-4026** | 2026‑04‑01 | Admin | Tea Bags × 5 @ ₹400 = ₹2000 (×2)<br>Tea Bags × 10 @ ₹400 = ₹4000<br>Tea Bags × 1 @ ₹400 = ₹400 | ₹8400 | ₹1512.0 | **₹9912.0** | 0 |
+| **MET-2026-4010** | 2026‑04‑14 | Admin | Tea Bags × 10 @ ₹400 = ₹4000<br>Tea Bags × 3 @ ₹400 = ₹1200 | ₹5200 | ₹936.0 | **₹6136.0** | 4 |
+
+*All amounts are exactly as extracted from the provided invoice chunks; no values have been invented.*
+
+---
+
+## Recommendation  
+
+**Continue working with Metro, but with enhanced controls:**
+
+1. **Maintain the relationship** for bulk supplies because Metro’s pricing is **12 % below market average**, delivering clear cost savings.  
+2. **Implement monitoring** for:  
+   - Delivery timelines (note occasional delays).  
+   - GST/compliance checks – specifically watch for HSN/SAC mismatches (2 discrepancies were previously flagged).  
+3. **Finance‑level oversight:** Flag any invoice with a **risk score ≥ 8** (e.g., MTR‑2026-6666) or any GST mismatch for manual review before payment.  
+4. **Regular review:** Re‑evaluate vendor performance quarterly, using the same criteria (delivery, compliance, cost efficiency).
+
+By keeping Metro as a vendor while strengthening compliance and monitoring processes, the organization can retain the cost benefits while mitigating the identified risks.
+
+=====================================
+QUERY: Why was invoice OBH-2026-9999 rejected?
+=====================================
+TIME: 8.31s
+SOURCES: 5
+ANSWER:
+## Reason for Rejection
+**Invoice OBH-2026-9999 was rejected because it was a duplicate submission** – the vendor sent the exact same invoice (same amount, same line items) through two different channels (email and the vendor portal) within a 3‑day window.
+
+## Evidence from the context
+- **Document 1 (Risk Investigation Report)** states:  
+  > “Investigation revealed this is a **Duplicate Invoice**. The vendor submitted the exact same invoice (same amount, same items) via both email and the vendor portal within a 3‑day window.”  
+  > “The duplicate submission was **Rejected**.”  
+
+- The invoice details (OBH‑2026-9999, Vendor: OneBite Hapoli, GSTIN: 24ABCDE1234F1Z5, Date: 2026‑06‑01, Grand Total: ₹5,900) appear identically in **Documents 2 and 3**, confirming that the same invoice was submitted twice.
+
+**Conclusion:** The rejection was due to the duplicate filing, not because of any error in the invoice content itself.
+
+=====================================
+QUERY: Give me today's executive summary.
+=====================================
+TIME: 12.95s
+SOURCES: 1
+ANSWER:
+Total: **₹11,685,023.30**
+

@@ -52,15 +52,6 @@ export default function Sidebar() {
       items: [
         { name: "Invoice Operations", href: "/operations/invoices", icon: FileText },
         { name: "Vendor Hub", href: "/operations/vendors", icon: Users },
-        { name: "Departments", href: "/operations/departments", icon: Building2 },
-      ],
-    },
-    {
-      title: "Intelligence",
-      items: [
-        { name: "Financial Intelligence", href: "/analytics/financial", icon: PieChart },
-        { name: "Vendor Intelligence", href: "/analytics/vendor", icon: BarChart3 },
-        { name: "Department Intelligence", href: "/analytics/department", icon: Network },
       ],
     },
     {
@@ -88,7 +79,7 @@ export default function Sidebar() {
       title: "Intelligence",
       items: [
         { name: "Business Intelligence", href: "/vendor/intelligence", icon: BarChart3 },
-        { name: "AI Advisor", href: "/vendor/advisor", icon: Bot },
+        { name: "AI Advisor", href: "/copilot", icon: Bot },
       ],
     },
   ];

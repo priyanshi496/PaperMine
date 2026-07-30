@@ -49,7 +49,7 @@ def get_dashboard_overview(
     total_invoices = len(invoices)
     total_vendors = len(vendors)
     
-    pending_count = sum(1 for inv in invoices if inv.payment_status == "Pending" or not inv.payment_status)
+    pending_count = sum(1 for inv in invoices if inv.verification_status == "Vendor Confirmed" or not inv.verification_status)
     high_risk_count = sum(1 for inv in invoices if (inv.risk_score or 0) >= 5)
     
     # Calculate Business Health Score (0-100)

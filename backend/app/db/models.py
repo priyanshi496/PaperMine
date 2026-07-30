@@ -9,7 +9,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    role = Column(String, default="vendor") # admin, vendor, finance_executive, finance_manager, cfo
+    role = Column(String, default="vendor") # admin, vendor, finance_team, cfo
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
     
     vendor = relationship("Vendor", foreign_keys=[vendor_id], back_populates="users")

@@ -26,7 +26,6 @@ import { Search, AlertTriangle, FileText, CheckCircle2, FileCheck2, Bot, Buildin
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { usePageContext } from "@/context/PageContext";
 
 export default function InvoiceOperations() {
   const { authState, loading: authLoading } = useAuth();
@@ -34,20 +33,12 @@ export default function InvoiceOperations() {
   const [filtered, setFiltered] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const { setPageContext } = usePageContext();
   
   // Drawer State
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [invoiceDetails, setInvoiceDetails] = useState<any | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
-
-  useEffect(() => {
-    setPageContext({ 
-      page: "Invoices", 
-      active_invoice: selectedInvoice?.id || undefined
-    });
-  }, [selectedInvoice, setPageContext]);
 
   useEffect(() => {
     if (!authLoading && authState.token) {
@@ -105,8 +96,8 @@ export default function InvoiceOperations() {
   return (
     <div className="flex-1 p-8 space-y-6 max-w-7xl mx-auto">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Invoice Operations</h1>
-        <p className="text-muted-foreground mt-1">Review, verify, and approve invoices across all departments.</p>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">My Invoices</h1>
+        <p className="text-muted-foreground mt-1">Review your submitted invoices and verify AI extractions.</p>
       </div>
 
       <div className="flex items-center gap-4">
@@ -396,25 +387,17 @@ export default function InvoiceOperations() {
 
                           <div className="h-px bg-border/50 w-full mb-6" />
 
-                          {/* Top 3 Line Items */}
+                          {/* Items Found */}
                           <div className="mb-6">
-                             <h4 className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground mb-3">Top Line Items</h4>
-                             <ul className="space-y-3 mb-4">
-                                {invoiceDetails.line_items
-                                   .sort((a: any, b: any) => parseFloat(b.amount) - parseFloat(a.amount))
-                                   .slice(0, 3)
-                                   .map((item: any) => (
-                                   <li key={item.id} className="flex justify-between items-center text-[14px]">
-                                      <span className="font-medium truncate mr-4">{item.description}</span>
-                                      <span className="font-semibold whitespace-nowrap">₹{parseFloat(item.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                             <h4 className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground mb-3">Items Found</h4>
+                             <ul className="space-y-3">
+                                {invoiceDetails.line_items.map((item: any) => (
+                                   <li key={item.id} className="flex items-start gap-2 text-[14px]">
+                                      <span className="text-muted-foreground mt-0.5">•</span>
+                                      <span>Categorized <strong>{item.description}</strong> as <Badge variant="secondary" className="text-[10px] px-1.5 py-0 uppercase mx-1">{item.category}</Badge></span>
                                    </li>
                                 ))}
                              </ul>
-                             {invoiceDetails.line_items.length > 3 && (
-                                <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => setActiveTab("ocr")}>
-                                   View All {invoiceDetails.line_items.length} Items
-                                </Button>
-                             )}
                           </div>
 
                           <div className="h-px bg-border/50 w-full mb-6" />
@@ -547,9 +530,9 @@ export default function InvoiceOperations() {
                              <p className="text-xs text-red-500 mt-1 font-semibold flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Policy Violation</p>
                           </div>
                           <div className="relative pl-6">
-                             <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full bg-slate-800 ring-4 ring-background" />
-                             <p className="text-[14.5px] font-semibold text-muted-foreground">Workflow Stopped</p>
-                             <p className="text-xs text-muted-foreground mt-1">Process Terminated</p>
+                             <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full bg-muted ring-4 ring-background" />
+                             <p className="text-[14.5px] font-semibold text-muted-foreground">Waiting for Resubmission</p>
+                             <p className="text-xs text-muted-foreground mt-1">Vendor Action Required</p>
                           </div>
                         </>
                       ) : (

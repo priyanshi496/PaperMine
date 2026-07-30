@@ -7,6 +7,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+import { PageProvider } from "@/context/PageContext";
+
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const inter = Inter({ subsets: ["latin"], variable: '--font-inter' });
@@ -40,9 +42,11 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <TooltipProvider>
-            <AuthProvider>
-              <LayoutShell>{children}</LayoutShell>
-            </AuthProvider>
+            <PageProvider>
+              <AuthProvider>
+                <LayoutShell>{children}</LayoutShell>
+              </AuthProvider>
+            </PageProvider>
           </TooltipProvider>
         </ThemeProvider>
       </body>

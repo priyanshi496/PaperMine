@@ -138,6 +138,7 @@ class KnowledgeEngine:
                 "document_id": chunk.document_id,
                 "vendor_id": chunk.vendor_id,
                 "text": chunk.chunk_text,
+                "filename": chunk.document.filename if chunk.document else None,
                 "distance": float(distances[0][i])
             })
 

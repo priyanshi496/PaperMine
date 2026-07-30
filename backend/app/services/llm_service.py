@@ -275,7 +275,7 @@ no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
         return fallback
 
 
-def call_llm_assistant_intent(query: str, chat_history: list = None) -> Optional[dict]:
+def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_context: dict = None) -> Optional[dict]:
     """
     Classifies a user query into STRUCTURED (SQL) or SEMANTIC (RAG).
     Uses Ollama (Qwen3:8B) as primary — free, local, zero latency.
@@ -301,7 +301,11 @@ def call_llm_assistant_intent(query: str, chat_history: list = None) -> Optional
             [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in chat_history[-6:]]
         ) + "\n-------------------------------------\n\n"
 
-    prompt_text = f"""{history_str}--- CURRENT USER QUESTION ---
+    context_str = ""
+    if frontend_context:
+        context_str = f"--- FRONTEND CONTEXT ---\nThe user is currently looking at this page on the UI: {json.dumps(frontend_context)}\nUse this to understand vague pronouns like 'this invoice' or 'these vendors'.\n------------------------\n\n"
+
+    prompt_text = f"""{history_str}{context_str}--- CURRENT USER QUESTION ---
 "{query}"
 -----------------------------
 
@@ -352,7 +356,7 @@ Schema:
   ],
   "aggregate_fn": "sum" | "avg" | "count" | "min" | "max" | null,
   "aggregate_field": "total_amount" | "tax_amount" | "amount" | null,
-  "group_by": "description" | "category" | null,
+  "group_by": "description" | "category" | "department" | "vendor_id" | null,
   "sort_field": "total_amount" | "invoice_date" | "tax_amount" | null,
   "sort_dir": "asc" | "desc" | null,
   "limit": integer | null,
@@ -362,14 +366,27 @@ Schema:
 ### Supported Entities & Fields:
 
 **entity: invoice**
-- invoice_number (text), invoice_date (text, format YYYY-MM-DD), due_date (text), payment_status (text: "Pending"/"Paid"), verification_status (text: "Verified"/"Unverified"), risk_score (number), vendor_id (number), total_amount (amount), tax_amount (amount)
+- invoice_number (text), invoice_date (text, format YYYY-MM-DD), due_date (text)
+- payment_status (text: "Pending" means money not yet paid, "Paid" means payment completed)
+- verification_status (text: valid values are EXACTLY "Approved", "Rejected", "Vendor Confirmed", "Paid", "Unverified")
+  - "Approved" = approved by finance team, ready to pay
+  - "Rejected" = rejected by finance team due to fraud/issues
+  - "Vendor Confirmed" = submitted by vendor, waiting for finance team review/approval
+  - "Paid" = payment completed
+  - "Unverified" = newly uploaded, not yet reviewed
+  - ⚠️ IMPORTANT: "pending approval" or "awaiting approval" means verification_status == "Vendor Confirmed"
+  - ⚠️ IMPORTANT: "pending payment" means payment_status == "Pending"
+  - ⚠️ IMPORTANT: "approved invoices" means verification_status == "Approved"
+  - ⚠️ IMPORTANT: "rejected invoices" means verification_status == "Rejected"
+- risk_score (number 0-10, where >7 is high risk), vendor_id (number), department (text)
+- total_amount (amount), tax_amount (amount)
 - Cross-filters (only with invoice entity): line_item.description (contains), line_item.category (contains)
 
 **entity: line_item**
 - description (text), category (text), amount (amount)
 
 **entity: alert**
-- alert_type (text: "Duplicate"), severity (text: "medium"/"high")
+- alert_type (text: "Duplicate", "GST Mismatch", "Bank Mismatch"), severity (text: "medium"/"high")
 
 **entity: vendor**
 - name (text), gstin (text), trust_score (number), total_spent (number), is_verified (number), duplicate_invoices (number), compliance_issues (number)
@@ -397,10 +414,18 @@ Supported Operators (op): >, <, >=, <=, ==, !=, contains
 | Spending by category | DATABASE | line_item | aggregate | [] | sum | amount | category | false |
 | Show all alerts | DATABASE | alert | list | [] | null | null | false |
 | Duplicate invoices | DATABASE | alert | list | [alert_type == "Duplicate"] | null | null | false |
+| GST mismatch invoices | DATABASE | alert | list | [alert_type == "GST Mismatch"] | null | null | false |
+| Bank mismatch invoices | DATABASE | alert | list | [alert_type == "Bank Mismatch"] | null | null | false |
+| High risk invoices | DATABASE | invoice | list | [risk_score > 7] | null | null | false |
 | Vendor profile | DATABASE | vendor | list | [] | null | null | false |
 | My GSTIN | DATABASE | vendor | list | [] | null | null | false |
 | Trust score | DATABASE | vendor | list | [] | null | null | false |
-| Verified invoices with coffee | DATABASE | invoice | list | [verification_status == "Verified", line_item.description contains "coffee"] | null | null | true |
+| Show approved invoices | DATABASE | invoice | list | [verification_status == "Approved"] | null | null | false |
+| Show rejected invoices | DATABASE | invoice | list | [verification_status == "Rejected"] | null | null | false |
+| Show invoices pending approval / awaiting approval | DATABASE | invoice | list | [verification_status == "Vendor Confirmed"] | null | null | false |
+| Show invoices pending payment | DATABASE | invoice | list | [payment_status == "Pending"] | null | null | false |
+| Show paid invoices | DATABASE | invoice | list | [payment_status == "Paid"] | null | null | false |
+| Approved invoices with coffee | DATABASE | invoice | list | [verification_status == "Approved", line_item.description contains "coffee"] | null | null | true |
 | Invoices >₹1500 with French Fries | DATABASE | invoice | list | [total_amount > 1500, line_item.description contains "French Fries"] | null | null | true |
 | Spending trends / most purchased | DATABASE | line_item | aggregate | [] | sum | amount | description | false |
 | Highest coffee expense invoice | DATABASE | invoice | list | [line_item.description contains "coffee"] | null | total_amount desc | true | limit 1 |
@@ -614,13 +639,25 @@ List each invoice that contains the item:
 
 ---
 
-## For Spending Analysis ("What do I spend most on?", "Trends?"):
-Provide a ranked breakdown with totals, then give 2-3 actionable insights.
+## For Spending Analysis or Trend Questions ("What do I spend most on?", "Trends?", "Total Spend"):
+Do NOT just return a raw number. Act as a Financial Analyst.
+Use this format:
+
+### Executive Insight
+[1-2 sentences summarizing the key takeaway, e.g., "Total procurement spending reached ₹2.3 lakh this month, with IT procurement contributing 62%."]
+
+### Breakdown
+| Category/Vendor | Amount (₹) |
+|---|---:|
+| ... | ... |
+
+### Recommendation
+[1 actionable recommendation based on the data, e.g., "Review Dell purchasing contracts before the next procurement cycle."]
 
 ---
 
 ## For Finance Report / Summary of All Invoices:
-Provide a summary table, then spending breakdown, then recommendations.
+Same as above: provide an Executive Insight, followed by a breakdown table (with amounts right-aligned using `|---:|`), and end with a Recommendation.
 
 ---
 
@@ -629,10 +666,11 @@ Provide a summary table, then spending breakdown, then recommendations.
 2. Always include: Item | Qty | Unit Price | Total in the items table.
 3. For MULTIPLE invoices: separate each invoice clearly with its own section heading.
 4. For comparisons: always use a side-by-side table format.
-5. Preserve exact invoice numbers, dates, GSTINs, and amounts from the context.
-6. OCR may confuse 1/I/l, 0/O, 5/S — note this if flagging a discrepancy as fraud.
-7. If context does not contain the answer, say: "This information is not available in the indexed documents."
-8. Never invent values. Use ONLY the provided context chunks."""
+5. **Business Context**: If a "BUSINESS CONTEXT DOCUMENT" (Memo, Policy, Report) is provided, heavily rely on it to answer "Why" questions, provide strategic reasoning, or explain spending trends. Combine this context gracefully with the quantitative invoice data to sound like an expert Financial Analyst.
+6. Preserve exact invoice numbers, dates, GSTINs, and amounts from the context.
+7. OCR may confuse 1/I/l, 0/O, 5/S — note this if flagging a discrepancy as fraud.
+8. If context does not contain the answer, say: "This information is not available in the indexed documents."
+9. Never invent values or reasons. Use ONLY the provided context chunks."""
 
     retrieval_instructions = """**Instructions for using retrieved chunks:**
 1. Read ALL chunks before answering. Do not answer from only the first chunk.
@@ -688,3 +726,158 @@ Provide a summary table, then spending breakdown, then recommendations.
             return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error generating answer: {str(e)}"
+
+async def call_llm_rag_answer_stream(query: str, context: str, chat_history: list = None, is_general: bool = False, frontend_context: dict = None, user_role: str = None, user_email: str = None):
+    """
+    Generates a final RAG answer using retrieved document chunks as context, streaming the response.
+    Builds a role-aware persona system prompt based on user_role.
+    """
+    load_env_file()
+
+    history_messages = []
+    if chat_history:
+        for msg in chat_history[-6:]:
+            role = msg.get("role", "user")
+            if role in ("user", "assistant"):
+                history_messages.append({"role": role, "content": msg["content"]})
+
+    # --- Role-Aware Persona System Prompt ---
+    COMMON_RULES = """
+# CRITICAL RULES
+1. NEVER hallucinate. NEVER invent values not present in the context.
+2. If context does not contain the answer, say so explicitly — do not guess.
+3. Never invent missing values. If a field is not in the context, say "Not available."
+4. Always use **markdown formatting** — bold for amounts (₹), invoice numbers, statuses.
+5. Use ## and ### headings, bullet lists, and **markdown tables** where appropriate.
+6. Never answer in a single unformatted paragraph.
+"""
+
+    if is_general:
+        system = f"""# ROLE
+You are PaperMine AI, a professional Financial Intelligence Assistant.
+The user is greeting you or asking a general question. Respond warmly and concisely.
+Do not output invoice tables or markdown lists unless explicitly asked.
+{COMMON_RULES}"""
+
+    elif user_role == "vendor":
+        # Vendors only see their own data. Persona = personal business advisor.
+        system = f"""# ROLE
+You are PaperMine AI, a Personal Business Advisor for this vendor.
+The logged-in user is a VENDOR ({user_email or 'vendor'}).
+
+## YOUR JOB
+- Help the vendor understand their own invoices, payments, and business performance.
+- You ONLY have access to this vendor's invoices. Do NOT discuss other vendors or company-wide finances.
+- If the vendor asks about company-wide spending, other departments, or other vendors — politely decline: "That information is not available in your vendor account."
+- Speak directly to the vendor about THEIR business: "Your invoices", "Your revenue", "Your payments".
+
+## VENDOR RESPONSE STYLE
+- Be encouraging and business-advisor like: surface revenue trends, flag pending payments, highlight risks.
+- Keep answers focused. Do not overwhelm with data — pick the most relevant facts.
+- For invoice questions: show the vendor what was extracted, confirm totals, flag any discrepancies.
+- For business advice questions: give 2–3 actionable recommendations based on their data.
+
+{COMMON_RULES}"""
+
+    elif user_role == "finance_team":
+        # Finance team = operational. They process, investigate, approve/reject invoices.
+        system = f"""# ROLE
+You are PaperMine AI, an Operational Finance Assistant for the Finance Team.
+The logged-in user is a FINANCE TEAM member ({user_email or 'finance team'}).
+
+## YOUR JOB
+- Help the finance team process invoices efficiently: review, investigate anomalies, approve, reject.
+- You have access to ALL company invoices and vendor data.
+- Focus on: invoice details, AI-detected risks, fraud alerts, GST mismatches, payment status.
+- Surface actionable items: "This invoice has a bank mismatch and needs manual verification."
+
+## FINANCE TEAM RESPONSE STYLE
+- Be thorough and precise — finance team needs complete information to make decisions.
+- For fraud/risk questions: list specific invoices, flag exact anomalies, explain the AI's reasoning.
+- For vendor questions: compare metrics objectively — trust scores, compliance issues, total spent.
+- For approval workflow: be clear about what action is needed and why.
+- Present data in organized tables — the finance team lives in spreadsheets.
+
+{COMMON_RULES}"""
+
+    elif user_role in ("cfo", "admin"):
+        # CFO = executive. Never processes invoices. Needs strategic insights and summaries.
+        system = f"""# ROLE
+You are PaperMine AI, a Strategic Financial Advisor for the CFO.
+The logged-in user is the CFO ({user_email or 'CFO'}).
+
+## YOUR JOB
+- The CFO does NOT process individual invoices. They make high-level strategic decisions.
+- Provide board-level insights: spending trends, risk summaries, vendor performance, budget health.
+- Every answer must end with a **Strategic Recommendation** or **Executive Action Item**.
+- Do NOT list every invoice. Summarize, aggregate, and surface only what matters at the executive level.
+
+## CFO RESPONSE STYLE
+- Lead with the **headline figure** or **key insight** — put the most important number first.
+- Use the "## Executive Summary", "## Key Risks", "## Recommendation" structure.
+- Translate raw data into business language: not "₹8,52,000 total_amount" but "Dell is our highest-cost vendor at ₹8.52L this quarter."
+- For risk questions: quantify the risk in rupees and business impact, not just flags.
+- For spending questions: compare periods, highlight anomalies, and suggest next steps.
+- Keep answers concise — CFOs don't read walls of text. Max 3–4 bullet points per section.
+
+{COMMON_RULES}"""
+
+    else:
+        # Default fallback
+        system = f"""# ROLE
+You are PaperMine AI, an enterprise-grade Financial Intelligence Assistant.
+You help businesses understand invoices, vendors, expenses, and fraud risks.
+{COMMON_RULES}"""
+
+    retrieval_instructions = """**Instructions for using retrieved data:**
+1. Read ALL provided data before answering — never answer from only the first record.
+2. Merge information coherently. If items appear in multiple invoices, organize clearly.
+3. Extract every line item exactly as written — never omit or summarize products.
+4. Preserve invoice numbers, quantities, totals, and dates exactly as given.
+5. If information conflicts between sources, note the conflict explicitly."""
+
+    context_str = ""
+    if frontend_context:
+        context_str = f"## Frontend UI Context\nThe user is currently viewing: {json.dumps(frontend_context)}\nUse this to resolve references like 'this invoice' or 'current page'.\n\n"
+
+    user_content = f"{retrieval_instructions}\n\n{context_str}## Data / Retrieved Chunks\n{context}\n\n## User Question\n{query}"
+    prompt = f"{system}\n\n{user_content}"
+    
+    provider, client = get_llm_client()
+    if not provider or not client:
+        yield "I'm sorry, my language model is currently disconnected."
+        return
+
+    import asyncio
+    try:
+        if provider == "gemini":
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={"response_modalities": ["TEXT"]}
+            )
+            # Gemini Python SDK doesn't natively support async streams well in all versions, 
+            # so we'll simulate streaming by chunking the text if native stream fails or just stream it.
+            # We'll use the blocking stream and yield it in an async generator.
+            stream_response = client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            for chunk in stream_response:
+                if chunk.text:
+                    yield chunk.text
+                    await asyncio.sleep(0.01) # Small yield to event loop
+        elif provider == "openai":
+            model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True
+            )
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+                    await asyncio.sleep(0.01)
+    except Exception as e:
+        yield f"\n\nError generating answer stream: {str(e)}"
