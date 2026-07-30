@@ -207,7 +207,16 @@ export default function InvoiceOperations() {
                       )
                     ) : authState.user?.role === "vendor" ? (
                       invoiceDetails.verification_status === "Unverified" && (
-                        <Button variant="default" size="sm" className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground">
+                        <Button 
+                          variant="default" 
+                          size="sm" 
+                          className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                          onClick={() => {
+                            if (invoiceDetails && invoiceDetails.id) {
+                              window.location.href = `/document/${selectedInvoice.document_id}`;
+                            }
+                          }}
+                        >
                           Confirm & Submit
                         </Button>
                       )

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Save, Plus, Trash2, Check } from "lucide-react";
 import axios from "axios";
 
@@ -19,6 +19,44 @@ export default function EditableJsonTable({ documentId, initialJsonStr, onSaveSu
       return {};
     }
   });
+  
+  const [hasAttemptedFetch, setHasAttemptedFetch] = useState(false);
+
+  useEffect(() => {
+    if (Object.keys(data).length === 0 && !hasAttemptedFetch) {
+      setHasAttemptedFetch(true);
+      const token = localStorage.getItem("papermine_token");
+      axios.get(`http://localhost:8000/api/v1/invoices/document/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => {
+          if (res.data) {
+            // Construct a mock summary structure based on the database invoice and line items
+            const mockSummary: any = {
+              supplier_name: { value: res.data.vendor_name || "" },
+              invoice_number: { value: res.data.invoice_number || "" },
+              invoice_date: { value: res.data.invoice_date || "" },
+              total_amount: { value: res.data.total_amount || "" },
+              tax_amount: { value: res.data.tax_amount || "" }
+            };
+            
+            if (res.data.line_items && res.data.line_items.length > 0) {
+              const headers = ["description", "amount", "category"];
+              const tableValue = [headers];
+              res.data.line_items.forEach((item: any) => {
+                tableValue.push([item.description || "", item.amount || "", item.category || ""]);
+              });
+              mockSummary.table = { value: tableValue };
+            }
+            
+            setData(mockSummary);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to fetch invoice for empty JSON", err);
+        });
+    }
+  }, [data, documentId, hasAttemptedFetch]);
   
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
@@ -69,8 +107,11 @@ export default function EditableJsonTable({ documentId, initialJsonStr, onSaveSu
     setIsSaving(true);
     setSaveStatus("saving");
     try {
+      const token = localStorage.getItem("papermine_token");
       await axios.put(`http://localhost:8000/api/v1/documents/${documentId}/summary`, {
         summary: JSON.stringify(data)
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
       });
       setSaveStatus("success");
       onSaveSuccess();

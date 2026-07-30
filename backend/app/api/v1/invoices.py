@@ -106,6 +106,8 @@ def get_invoice_by_document(
         "total_amount": invoice.total_amount or "",
         "tax_amount": invoice.tax_amount or "",
         "verification_status": invoice.verification_status,
+        "payment_status": invoice.payment_status or "Pending",
+        "risk_score": invoice.risk_score or 0,
         "line_items": [{"id": li.id, "description": li.description, "amount": li.amount, "category": li.category} for li in invoice.line_items],
         "alerts": alerts_data
     }

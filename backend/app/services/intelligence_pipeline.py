@@ -44,6 +44,25 @@ def run_intelligence_pipeline(db: Session, document_id: int, structured: dict):
         # Strict isolation: use the authenticated user's vendor ID.
         # NEVER create a new vendor or match against GSTIN in this flow.
         vendor = db.query(models.Vendor).filter(models.Vendor.id == user.vendor_id).first()
+        
+        # Verify that the OCR supplier matches the authenticated vendor
+        if vendor and supplier_name:
+            import difflib
+            similarity = difflib.SequenceMatcher(None, vendor.name.lower(), supplier_name.lower()).ratio()
+            
+            # If similarity is very low, it's definitely a different vendor (e.g. Dell vs OneBite Hapoli)
+            if similarity < 0.5 and not (vendor.name.lower() in supplier_name.lower() or supplier_name.lower() in vendor.name.lower()):
+                doc.status = "rejected"
+                db.add(models.InsightAlert(
+                    document_id=document_id,
+                    alert_type="Vendor Mismatch",
+                    severity="high",
+                    message=f"Fraud Alert! Uploaded invoice belongs to '{supplier_name}'.",
+                    explanation=f"You are logged in as '{vendor.name}' and cannot submit invoices on behalf of other vendors.",
+                    confidence_score=99
+                ))
+                db.commit()
+                return  # Stop execution, reject the invoice
     else:
         # Admin flow: Resolve vendor from OCR data
         if supplier_gstin:

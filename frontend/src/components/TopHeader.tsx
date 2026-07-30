@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { LogOut, Search, Plus, Upload, Bot, FileText, Bell, History, Moon, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
+import { useRouter } from "next/navigation";
 import {
   CommandDialog,
   CommandEmpty,
@@ -26,6 +27,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export default function TopHeader() {
+  const router = useRouter();
   const { authState, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -76,7 +78,7 @@ export default function TopHeader() {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem className="cursor-pointer" onClick={() => router.push('/documents')}>
                 <Upload className="mr-2 h-4 w-4" />
                 Upload Invoice
               </DropdownMenuItem>

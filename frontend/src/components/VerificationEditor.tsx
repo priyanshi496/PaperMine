@@ -27,6 +27,9 @@ interface InvoiceData {
   vendor_ifsc: string;
   vendor_address: string;
   vendor_is_verified: boolean;
+  payment_status: string;
+  risk_score: number;
+  line_items: { id: number, description: string, amount: string, category: string }[];
   alerts: InsightAlert[];
 }
 
@@ -256,6 +259,72 @@ export default function VerificationEditor({ documentId, isProcessing }: { docum
                   <input type="text" name="tax_amount" value={formData.tax_amount} onChange={handleChange}
                     className="w-full pl-8 pr-3 py-2 bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-lg outline-none transition-all text-sm font-bold text-slate-900 font-mono"
                   />
+                </div>
+              </div>
+            </div>
+            
+            {/* Invoice Line Items */}
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2 pt-2">
+              <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wide">Purchased Items</h4>
+            </div>
+            {invoice.line_items && invoice.line_items.length > 0 ? (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
+                    <tr>
+                      <th className="px-4 py-2 border-b border-slate-200">Description</th>
+                      <th className="px-4 py-2 border-b border-slate-200">Category</th>
+                      <th className="px-4 py-2 border-b border-slate-200 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {invoice.line_items.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-medium text-slate-700">{item.description}</td>
+                        <td className="px-4 py-3">
+                          <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] uppercase font-bold">{item.category || "Uncategorized"}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-medium text-slate-700">₹{item.amount || "0"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 italic">No line items recorded for this invoice.</p>
+            )}
+
+            {/* Status Information */}
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2 pt-2">
+              <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wide">Processing Status</h4>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Payment Status</label>
+                <div className="font-semibold text-sm text-slate-800">
+                  {invoice.payment_status === "Paid" ? (
+                    <span className="text-emerald-600">{invoice.payment_status}</span>
+                  ) : invoice.payment_status === "Overdue" ? (
+                    <span className="text-rose-600">{invoice.payment_status}</span>
+                  ) : (
+                    <span className="text-amber-600">{invoice.payment_status}</span>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Verification</label>
+                <div className="font-semibold text-sm text-slate-800">
+                  {invoice.verification_status}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Risk Score</label>
+                <div className="font-semibold text-sm">
+                  {invoice.risk_score >= 5 ? (
+                    <span className="text-rose-600 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5"/> High Risk ({invoice.risk_score}/10)</span>
+                  ) : (
+                    <span className="text-emerald-600">Low Risk ({invoice.risk_score}/10)</span>
+                  )}
                 </div>
               </div>
             </div>

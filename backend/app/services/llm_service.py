@@ -25,47 +25,73 @@ def load_env_file():
 _gemini_client = None
 _openai_client = None
 
-def get_llm_client():
+def get_llm_client(purpose: str = "ocr"):
     """
-    Initializes and returns the appropriate LLM client based on environment variables:
-    1. GEMINI_API_KEY -> Uses new google-genai SDK Client
-    2. OPENAI_API_KEY -> Uses OpenAI client
-    3. OPENROUTER_API_KEY -> Uses OpenAI client configured for OpenRouter
+    Initializes and returns the appropriate LLM client based on purpose:
+    - "ocr": Prioritizes Gemini
+    - "assistant": Prioritizes NVIDIA NIM
     """
     global _gemini_client, _openai_client
     load_env_file()
 
-    # --- 1. NVIDIA NIM (GPT-OSS-120B) - HIGHEST PRIORITY ---
-    nvidia_key = os.environ.get("NVIDIA_API_KEY")
-    if nvidia_key:
-        if _openai_client is None:
-            try:
-                from openai import OpenAI
-                # Using openai client pointing to NVIDIA's endpoint
-                _openai_client = OpenAI(
-                    base_url="https://integrate.api.nvidia.com/v1",
-                    api_key=nvidia_key
-                )
-                os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b" # Force nemotron-3-super-120b-a12b
-            except Exception as e:
-                print(f"[LLM Service] NVIDIA init error: {e}")
-        if _openai_client:
-            return "openai", _openai_client
-    # -----------------------------------------------------------
+    # --- Assistant Flow: Prioritize NVIDIA NIM ---
+    if purpose == "assistant":
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            if _openai_client is None:
+                try:
+                    from openai import OpenAI
+                    _openai_client = OpenAI(
+                        base_url="https://integrate.api.nvidia.com/v1",
+                        api_key=nvidia_key
+                    )
+                    os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b" # Force nemotron-3-super-120b-a12b
+                except Exception as e:
+                    print(f"[LLM Service] NVIDIA init error: {e}")
+            if _openai_client:
+                return "openai", _openai_client
 
-    # 2. Google Gemini (New SDK)
+    # --- OCR Flow: Prioritize Gemini ---
+    if purpose == "ocr":
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_key:
+            if _gemini_client is None:
+                try:
+                    from google import genai
+                    _gemini_client = genai.Client(api_key=gemini_key)
+                except Exception as e:
+                    print(f"[LLM Service] Gemini (New SDK) init error: {e}")
+            if _gemini_client:
+                return "gemini", _gemini_client
+
+    # --- Fallbacks (if primary for the purpose fails) ---
+    
+    # 1. Google Gemini (New SDK) - as a fallback for assistant if NVIDIA fails
     gemini_key = os.environ.get("GEMINI_API_KEY")
-    if gemini_key:
+    if gemini_key and purpose == "assistant":
         if _gemini_client is None:
             try:
                 from google import genai
                 _gemini_client = genai.Client(api_key=gemini_key)
             except Exception as e:
-                print(f"[LLM Service] Gemini (New SDK) init error: {e}")
+                pass
         if _gemini_client:
             return "gemini", _gemini_client
 
-    # 3. OpenAI or OpenRouter
+    # 2. NVIDIA NIM - as a fallback for OCR if Gemini fails
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key and purpose == "ocr":
+        if _openai_client is None:
+            try:
+                from openai import OpenAI
+                _openai_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
+                os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b"
+            except Exception as e:
+                pass
+        if _openai_client:
+            return "openai", _openai_client
+
+    # 3. OpenAI or OpenRouter (Generic Fallback)
     openai_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if openai_key:
         if _openai_client is None:
@@ -83,23 +109,12 @@ def get_llm_client():
 
 def call_llm_structured_extraction(ocr_text: str) -> Optional[str]:
     """
-    Sends the noisy raw OCR text to the LLM to return a clean structured JSON string
-    matching the expected GST invoice fields.
-
-    IMPORTANT: temperature is pinned to 0. The prompt asks the model to make
-    judgment calls on ambiguous OCR characters (0 vs O, 1 vs I, etc.) and to
-    "reconstruct" garbled text. At non-zero temperature, the SAME document
-    can be extracted with a DIFFERENT invoice_number / GSTIN / amount on
-    different runs, because that reconstruction is sampled rather than
-    deterministic. Since invoice_number and GSTIN are then used as
-    effectively-primary-keys for matching, duplicate detection, and vendor
-    resolution, non-determinism here silently breaks all of those downstream.
-    temperature=0 doesn't remove OCR ambiguity, but it makes the model's
-    resolution of that ambiguity repeatable.
+    Extracts structured fields from raw OCR text, prioritizing Gemini.
     """
-    provider, client = get_llm_client()
-    if not provider or not client:
+    if not ocr_text or not ocr_text.strip():
         return None
+
+    provider, client = get_llm_client(purpose="ocr")
 
     prompt = f"""
 Analyze this noisy OCR text from an invoice/receipt. Extract the key summary fields and the line-items table.
@@ -208,21 +223,13 @@ Return ONLY the raw JSON block. No markdown explanation.
 
 def call_llm_categorize_items(descriptions: List[str]) -> List[str]:
     """
-    Batch-categorizes line-item descriptions into a small fixed taxonomy at
-    INGESTION time (once per invoice), so that spending-by-category queries
-    ("how much did I spend on coffee") become a deterministic SQL filter
-    instead of a live, non-deterministic LLM ID-matching call made fresh on
-    every user question. Runs once, cached in the DB — cheaper and stable.
-
-    Returns a list of category strings in the SAME order as `descriptions`.
-    Falls back to "Uncategorized" for every item if the LLM call fails, so
-    callers never get a length mismatch.
+    Takes a list of line item descriptions and returns a corresponding list of standard categories.
     """
     fallback = ["Uncategorized"] * len(descriptions)
     if not descriptions:
         return []
 
-    provider, client = get_llm_client()
+    provider, client = get_llm_client(purpose="ocr")
     if not provider or not client:
         return fallback
 
@@ -277,18 +284,7 @@ no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
 
 def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_context: dict = None) -> Optional[dict]:
     """
-    Classifies a user query into STRUCTURED (SQL) or SEMANTIC (RAG).
-    Uses Ollama (Qwen3:8B) as primary — free, local, zero latency.
-    Falls back to Gemini/OpenAI if Ollama is unavailable.
-
-    NOTE on accuracy: routing correctness gates everything downstream — a
-    misrouted aggregate question can't be fixed by anything later in the
-    pipeline. An 8B local model is materially weaker at precise multi-class
-    JSON routing than Gemini 2.5 Flash / GPT-4o-mini. If you're still seeing
-    routing errors after this patch, log which backend actually answered
-    each request (see the calling code in assistant.py) and compare
-    accuracy — you may want to make the stronger model primary for THIS
-    call specifically, even if Ollama stays primary for RAG generation.
+    Analyzes the user's query and determines the intent, prioritizing NVIDIA NIM.
     """
     load_env_file()
 
@@ -470,31 +466,7 @@ Extract metadata filters (`vendor_name`, `invoice_number`) by resolving the FULL
 Return a JSON object ONLY (no markdown, no explanation):
 {{"route": "DATABASE" | "DOCUMENT_SEARCH" | "GENERAL", "query_plan": {{...}} | null, "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null, "item_name": null}}, "search_query": "Optimized semantic search string for FAISS or null"}}"""
 
-    # --- Try Ollama first (local, free) --- (COMMENTED OUT TO USE NVIDIA NIM)
-    # from app.services.ollama_client import ollama_generate, ollama_is_available
-    # if ollama_is_available():
-    #     system = (
-    #         "You are a precise query router for a financial AI assistant. "
-    #         "Your ONLY job is to output a single valid JSON object with no extra text, "
-    #         "no thinking, no markdown fences."
-    #     )
-    #     try:
-    #         raw = ollama_generate(prompt_text, system=system, temperature=0.0)
-    #         if raw:
-    #             # Strip <think>...</think> blocks that Qwen3 may emit
-    #             import re
-    #             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    #             # Extract the first JSON object in the response
-    #             match = re.search(r"\{.*\}", raw, re.DOTALL)
-    #             if match:
-    #                 parsed = json.loads(match.group())
-    #                 parsed["_backend"] = "ollama"
-    #                 return parsed
-    #     except Exception as e:
-    #         print(f"[OllamaIntent] Error: {e}")
-
-    # --- Fallback: Gemini / OpenAI / NVIDIA ---
-    provider, client = get_llm_client()
+    provider, client = get_llm_client(purpose="assistant")
     if not provider or not client:
         return {"route": "DOCUMENT_SEARCH", "sql_templates": [], "filters": {}, "search_query": "", "_backend": "none"}
     try:
@@ -531,10 +503,9 @@ Return a JSON object ONLY (no markdown, no explanation):
 
 def call_llm_rag_answer(query: str, context: str, chat_history: list = None, is_general: bool = False) -> Optional[str]:
     """
-    Generates a final RAG answer using retrieved document chunks as context.
-    Uses Ollama (Qwen3:8B) as primary — free, local.
-    Falls back to Gemini/OpenAI if Ollama is unavailable.
+    Generates an answer based on the provided context (RAG) using NVIDIA NIM.
     """
+    provider, client = get_llm_client(purpose="assistant")
     load_env_file()
 
     history_messages = []
@@ -691,21 +662,6 @@ Same as above: provide an Executive Insight, followed by a breakdown table (with
 
     messages = history_messages + [{"role": "user", "content": user_content}]
 
-    # --- Try Ollama first (local, free) --- (COMMENTED OUT TO USE NVIDIA NIM)
-    # from app.services.ollama_client import ollama_chat, ollama_is_available
-    # if ollama_is_available():
-    #     try:
-    #         import re
-    #         raw = ollama_chat(messages, system=system, temperature=0.3)
-    #         if raw:
-    #             # Strip <think>...</think> blocks that Qwen3 may emit in thinking mode
-    #             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    #             return raw
-    #     except Exception as e:
-    #         print(f"[OllamaRAG] Error: {e}")
-
-    # --- Fallback: Gemini / OpenAI / NVIDIA ---
-    provider, client = get_llm_client()
     if not provider or not client:
         return "I'm sorry, my language model is currently disconnected."
 
@@ -729,9 +685,9 @@ Same as above: provide an Executive Insight, followed by a breakdown table (with
 
 async def call_llm_rag_answer_stream(query: str, context: str, chat_history: list = None, is_general: bool = False, frontend_context: dict = None, user_role: str = None, user_email: str = None):
     """
-    Generates a final RAG answer using retrieved document chunks as context, streaming the response.
-    Builds a role-aware persona system prompt based on user_role.
+    Streaming version of the RAG answer generator, prioritizing NVIDIA NIM.
     """
+    provider, client = get_llm_client(purpose="assistant")
     load_env_file()
 
     history_messages = []
