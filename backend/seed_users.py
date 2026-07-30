@@ -27,7 +27,43 @@ def seed_users():
         db.add(admin)
         print("Created admin user: admin@papermine.com / admin123")
         
-    # 3. Get existing vendors and create users for them
+    # 3. Add CFO User
+    cfo = db.query(User).filter(User.email == "cfo@technova.com").first()
+    if not cfo:
+        cfo = User(
+            email="cfo@technova.com",
+            hashed_password=get_password_hash("cfo123"),
+            role="cfo",
+            vendor_id=None
+        )
+        db.add(cfo)
+        print("Created CFO user: cfo@technova.com / cfo123")
+
+    # 4. Add Finance Manager User
+    manager = db.query(User).filter(User.email == "manager@technova.com").first()
+    if not manager:
+        manager = User(
+            email="manager@technova.com",
+            hashed_password=get_password_hash("manager123"),
+            role="finance_manager",
+            vendor_id=None
+        )
+        db.add(manager)
+        print("Created Finance Manager: manager@technova.com / manager123")
+
+    # 5. Add Finance Executive User
+    executive = db.query(User).filter(User.email == "executive@technova.com").first()
+    if not executive:
+        executive = User(
+            email="executive@technova.com",
+            hashed_password=get_password_hash("exec123"),
+            role="finance_executive",
+            vendor_id=None
+        )
+        db.add(executive)
+        print("Created Finance Executive: executive@technova.com / exec123")
+        
+    # 6. Get existing vendors and create users for them
     vendors = db.query(Vendor).all()
     for vendor in vendors:
         email = f"{vendor.name.lower().replace(' ', '')}@vendor.com"
