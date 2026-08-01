@@ -139,6 +139,9 @@ def _find_gstin(raw_text: str) -> Optional[str]:
 
 
 def extract_invoice_data(raw_text: str) -> Dict[str, Any]:
+    # Strip out the OCR post-processing tags before regex extraction
+    # so they don't get accidentally captured as values (e.g. "LOW" from [LOW_CONFIDENCE])
+    raw_text = raw_text.replace("[LOW_CONFIDENCE]", "")
     text_norm = _normalize(raw_text)
     data: Dict[str, Any] = {
         "invoice_number": None,

@@ -18,6 +18,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -31,7 +32,7 @@ export default function TopHeader() {
   const { authState, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
-  
+
   // ⌘K Shortcut Listener
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -49,11 +50,11 @@ export default function TopHeader() {
   return (
     <>
       <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b bg-background/95 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        
+
         {/* Global Search Button */}
         <div className="flex flex-1 items-center gap-4">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="relative h-9 w-full justify-start rounded-[0.5rem] bg-muted/50 text-sm font-normal text-muted-foreground shadow-none sm:pr-12 md:w-80 lg:w-96"
             onClick={() => setOpen(true)}
           >
@@ -68,7 +69,7 @@ export default function TopHeader() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-2">
-          
+
           {/* Quick Actions */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-9 gap-1 mr-2 rounded-full cursor-pointer")}>
@@ -76,27 +77,29 @@ export default function TopHeader() {
               <span className="hidden md:inline">Quick Action</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer" onClick={() => router.push('/documents')}>
-                <Upload className="mr-2 h-4 w-4" />
-                Upload Invoice
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <Bot className="mr-2 h-4 w-4" />
-                Ask AI Assistant
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <FileText className="mr-2 h-4 w-4" />
-                Generate Report
-              </DropdownMenuItem>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="cursor-pointer" onClick={() => router.push('/documents')}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Upload Invoice
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer">
+                  <Bot className="mr-2 h-4 w-4" />
+                  Ask AI Assistant
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Generate Report
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
 
           {/* Theme Toggle */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className="text-muted-foreground"
           >
@@ -110,7 +113,7 @@ export default function TopHeader() {
             <Bell className="h-5 w-5" />
             <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500"></span>
           </Button>
-          
+
         </div>
       </header>
 

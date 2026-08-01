@@ -399,4 +399,4 @@ print(f"Rebuilding FAISS index with {len(documents_to_embed)} chunks...")
 # We use the correct batch logic
 knowledge_engine.rebuild_index_from_db(db)
 
-print("✅ Seeding complete!")
+print("Seeding complete!")
