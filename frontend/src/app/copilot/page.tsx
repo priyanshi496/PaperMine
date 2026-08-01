@@ -6,7 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, User, Send, FileText, Search, BarChart3, ShieldAlert, Check, Copy, LineChart, TrendingUp } from "lucide-react";
+import { Bot, User, Send, FileText, Search, BarChart3, ShieldAlert, Check, Copy, LineChart, TrendingUp, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -183,7 +183,7 @@ export default function CopilotPage() {
       { icon: <ShieldAlert className="w-5 h-5 text-red-500" />, title: "Which of my invoices are pending?" },
       { icon: <FileText className="w-5 h-5 text-emerald-500" />, title: "Summarize my latest invoice." },
     ],
-    finance: [
+    finance_team: [
       { icon: <Search className="w-5 h-5 text-purple-500" />, title: "Show pending approvals." },
       { icon: <ShieldAlert className="w-5 h-5 text-red-500" />, title: "Are there any GST mismatches?" },
       { icon: <FileText className="w-5 h-5 text-amber-500" />, title: "Show all high-risk invoices." },
@@ -352,29 +352,43 @@ export default function CopilotPage() {
 
       {/* Input Area */}
       <div className="p-4 bg-background border-t">
-        <form 
-          className="relative flex items-center w-full max-w-3xl mx-auto bg-muted/30 border rounded-full shadow-sm focus-within:ring-1 focus-within:ring-primary/50 transition-all p-1"
-          onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-        >
-          <div className="pl-4 text-muted-foreground">
-            <Search className="w-5 h-5" />
-          </div>
-          <Input 
-            className="flex-1 border-none bg-transparent shadow-none focus-visible:ring-0 text-[15px]" 
-            placeholder="Ask Copilot about invoices, vendors, or trends..." 
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            disabled={loading}
-          />
-          <Button 
-            type="submit" 
-            size="icon" 
-            disabled={loading || !query.trim()} 
-            className="rounded-full h-10 w-10 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground transition-transform active:scale-95"
+        <div className="flex items-center gap-2 max-w-3xl mx-auto w-full">
+          <form 
+            className="relative flex items-center flex-1 bg-muted/30 border rounded-full shadow-sm focus-within:ring-1 focus-within:ring-primary/50 transition-all p-1"
+            onSubmit={(e) => { e.preventDefault(); handleSend(); }}
           >
-            <Send className="w-4 h-4" />
-          </Button>
-        </form>
+            <div className="pl-4 text-muted-foreground">
+              <Search className="w-5 h-5" />
+            </div>
+            <Input 
+              className="flex-1 border-none bg-transparent shadow-none focus-visible:ring-0 text-[15px]" 
+              placeholder="Ask Copilot about invoices, vendors, or trends..." 
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              disabled={loading}
+            />
+            <Button 
+              type="submit" 
+              size="icon"
+              disabled={loading || !query.trim()}
+              className="rounded-full h-10 w-10 bg-primary/90 hover:bg-primary transition-all mr-1"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </form>
+
+          {chatHistory.length > 0 && (
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={() => setChatHistory([])}
+              title="Clear chat history"
+              className="rounded-full shrink-0 h-11 w-11 border-dashed text-muted-foreground hover:text-red-500 hover:border-red-500 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-5 h-5" />
+            </Button>
+          )}
+        </div>
         <p className="text-center text-[11px] text-muted-foreground mt-3 font-medium">
           PaperMine AI can make mistakes. Check important numbers.
         </p>

@@ -1,0 +1,123 @@
+Testing Finance Team Intent Routing...
+
+Q: How many invoices are waiting?
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [{"field": "payment_status", "op": "==", "value": "Pending"}], "aggregate_fn": "count", "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show today's uploads.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "contains", "value": "2026-08-01"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: How many invoices were processed today?
+Route: DATABASE
+Plan: {"operation": "list", "fields": ["total_amount"], "filters": [{"field": "invoice_number", "op": "eq", "value": "OBH-2026-0002"}], "order_by": [], "limit": 1}
+--------------------------------------------------
+Q: Show invoices awaiting approval.
+Route: DATABASE
+Plan: {"database": "invoice", "operation": "list", "filters": [{"field": "invoice_number", "operator": "=", "value": "OBH-2026-0002"}], "aggregation": {"field": "total_amount", "function": "sum"}, "order_by": [], "limit": 1}
+--------------------------------------------------
+Q: Show rejected invoices.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "verification_status", "op": "==", "value": "Rejected"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show invoices pending approval.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "verification_status", "op": "==", "value": "Vendor Confirmed"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Approve invoice MTR-2026-6666.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_number", "op": "==", "value": "MTR-2026-6666"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": 1, "include_items": false}
+--------------------------------------------------
+Q: Reject invoice OBH-2026-9999.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_number", "op": "==", "value": "OBH-2026-9999"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": 1, "include_items": false}
+--------------------------------------------------
+Q: Show invoices older than 7 days.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "<", "value": "2026-07-25"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which invoices are still unpaid?
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "payment_status", "op": "==", "value": "Pending"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show GST mismatches.
+Route: DATABASE
+Plan: {"type": "list", "entity": "alert", "filters": [{"field": "alert_type", "op": "==", "value": "GST Mismatch"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show duplicate invoices.
+Route: DATABASE
+Plan: {"type": "list", "entity": "alert", "filters": [{"field": "alert_type", "op": "==", "value": "Duplicate"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show bank mismatches.
+Route: DATABASE
+Plan: {"type": "list", "entity": "alert", "filters": [{"field": "alert_type", "op": "==", "value": "Bank Mismatch"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show invoices requiring manual review.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "verification_status", "op": "==", "value": "Unverified"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which invoices have tax calculation errors?
+Route: DOCUMENT_SEARCH
+Filters: {'vendor_name': None, 'invoice_number': None, 'document_type': None, 'item_name': None}
+--------------------------------------------------
+Q: Which invoices have the highest risk score?
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "risk_score", "sort_dir": "desc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Compare Dell and Metro.
+Route: DATABASE
+Plan: {"type": "list", "entity": "vendor", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "total_spent", "sort_dir": "desc", "limit": 2, "include_items": false}
+--------------------------------------------------
+Q: Which vendor submitted the most invoices?
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "count", "aggregate_field": null, "group_by": "vendor_id", "sort_field": null, "sort_dir": null, "limit": 1, "include_items": false}
+--------------------------------------------------
+Q: Which vendor has the lowest trust score?
+Route: DATABASE
+Plan: {"type": "list", "entity": "vendor", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "trust_score", "sort_dir": "asc", "limit": 1, "include_items": false}
+--------------------------------------------------
+Q: Show IT department invoices.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "department", "op": "==", "value": "IT"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Compare department spending.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": "department", "sort_field": "total_amount", "sort_dir": "desc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which department spent the most?
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": "department", "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Total spending this month.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "contains", "value": "2026-08"}], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show invoices above ₹1 lakh.
+Route: DATABASE
+Plan: {"type": "list", "list? Wait need correct JSON. Let's construct properly. Wait need proper JSON. Let's produce: {": "list", "entity": "invoice", "filters": [{"field": "total_amount", "op": ">", "value": 100000}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Average invoice value.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "avg", "aggregate_field": "total_amount", "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Monthly GST collected.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "tax_amount", "group_by": "invoice_date", "sort_field": "invoice_date", "sort_dir": "asc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Monthly procurement spending.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "contains", "value": "2026-08"}], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show Dell invoices mentioning laptops.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "line_item.description", "op": "contains", "value": "laptops"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": true}
+--------------------------------------------------
+Q: Find rejected invoices with GST mismatch.
+Route: DATABASE
+Plan: {"type": "list", "entity": "alert", "filters": [{"field": "alert_type", "op": "==", "value": "GST Mismatch"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show cafeteria invoices containing pizza.
+Route: DATABASE
+Plan: {"entity": "invoice", "type": "list", "filters": [{"field": "department", "op": "contains", "value": "cafeteria"}, {"field": "line_item.description", "op": "contains", "value": "pizza"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": true}
+--------------------------------------------------
+Tests complete. 30/30 succeeded.

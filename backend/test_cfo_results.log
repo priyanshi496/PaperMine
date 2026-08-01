@@ -1,0 +1,82 @@
+Testing CFO Intent Routing...
+
+Q: Give me today's executive summary.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "==", "value": "2026-08-01"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "invoice_date", "sort_dir": "asc", "limit": null, "include_items": true}
+--------------------------------------------------
+Q: Summarize today's financial health.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", "op": "==", "value": "2026-08-01"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "invoice_date", "sort_dir": "asc", "limit": null, "include_items": true}
+--------------------------------------------------
+Q: Total company spending.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Compare April, May, and June.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", "op": ">=", "value": "2026-04-01"}, {"field": "invoice_date", "op": "<=", "value": "2026-06-30"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "invoice_date", "sort_dir": "asc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which department spent the most?
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": "department", "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Compare IT and Admin.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": "department", "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which vendor costs us the most?
+Route: DATABASE
+Plan: {"type": "list", "entity": "vendor", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "total_spent", "sort_dir": "desc", "limit": 1, "include_items": false}
+--------------------------------------------------
+Q: Compare Dell and Metro.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": "vendor_id", "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Show all high-risk invoices.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "risk_score", "op": ">", "value": 7}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Summarize fraud alerts.
+Route: DATABASE
+Plan: {"type": "list", "entity": "alert", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Why did IT spending increase?
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "department", "op": "==", "value": "IT"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "invoice_date", "sort_dir": "asc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Generate monthly financial report.
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "line_item", "filters": [], "aggregate_fn": "sum", "aggregate_field": "amount", "group_by": "description", "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Generate vendor performance report.
+Route: DATABASE
+Plan: {"type": "list", "entity": "vendor", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": "total_spent", "sort_dir": "desc", "limit": null, "include_items": false}
+--------------------------------------------------
+Q: What happened this month?
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "invoice_date", ">=": "2026-08-01"}, {"field": "invoice_date", "<=": "2026-08-31"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Are we spending too much?
+Route: DATABASE
+Plan: {"type": "aggregate", "entity": "invoice", "filters": [], "aggregate_fn": "sum", "aggregate_field": "total_amount", "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+
+Testing Multi-Turn Memory...
+
+Q: Show Metro invoices.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Only approved ones.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "vendor_name", "op": "==", "value": "Metro"}, {"field": "verification_status", "op": "==", "value": "Approved"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Only April.
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "vendor_name", "op": "==", "value": "Metro"}, {"field": "verification_status", "op": "==", "value": "Approved"}, {"field": "invoice_date", "op": "contains", "value": "2026-04"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Q: Which contains coffee?
+Route: DATABASE
+Plan: {"type": "list", "entity": "invoice", "filters": [{"field": "verification_status", "op": "==", "value": "Approved"}, {"field": "invoice_date", "op": "contains", "value": "2026-04"}, {"field": "line_item.description", "op": "contains", "value": "coffee"}], "aggregate_fn": null, "aggregate_field": null, "group_by": null, "sort_field": null, "sort_dir": null, "limit": null, "include_items": false}
+--------------------------------------------------
+Tests complete. 19/19 succeeded.

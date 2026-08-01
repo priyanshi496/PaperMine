@@ -132,6 +132,8 @@ class KnowledgeEngine:
                     continue
                 if filters.get("document_type") and chunk.document_type != filters.get("document_type"):
                     continue
+                if filters.get("document_id") and chunk.document_id != filters.get("document_id"):
+                    continue
 
             results.append({
                 "chunk_id": chunk.id,

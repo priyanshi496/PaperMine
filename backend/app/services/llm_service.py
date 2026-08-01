@@ -282,7 +282,7 @@ no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
         return fallback
 
 
-def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_context: dict = None) -> Optional[dict]:
+def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_context: dict = None, user_role: str = "vendor", user_email: str = "") -> Optional[dict]:
     """
     Analyzes the user's query and determines the intent, prioritizing NVIDIA NIM.
     """
@@ -301,7 +301,471 @@ def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_co
     if frontend_context:
         context_str = f"--- FRONTEND CONTEXT ---\nThe user is currently looking at this page on the UI: {json.dumps(frontend_context)}\nUse this to understand vague pronouns like 'this invoice' or 'these vendors'.\n------------------------\n\n"
 
-    prompt_text = f"""{history_str}{context_str}--- CURRENT USER QUESTION ---
+    import datetime
+    current_date = datetime.date.today().strftime("%Y-%m-%d")
+    date_context = f"--- CURRENT DATE ---\nToday is {current_date}. Use this to resolve relative dates like 'today', 'this month' (which would be {current_date[:7]}), etc.\n--------------------\n\n"
+
+    if user_role == "finance_team":
+        role_examples = """
+| Approve invoice MTR-2026-6666 | WORKFLOW | null | null | null | null | null | false |
+| Reject invoice OBH-2026-9999 | WORKFLOW | null | null | null | null | null | false |
+| How many invoices? | DATABASE | invoice | aggregate | [] | count | null | false |
+| Show today's uploads | DATABASE | invoice | list | [uploaded_at >= "today"] | null | uploaded_at desc | false |
+| How many invoices were processed today? | DATABASE | invoice | aggregate | [verification_status == "Approved" or "Rejected"] | count | null | false |
+| Show invoices awaiting approval | DATABASE | invoice | list | [verification_status == "Vendor Confirmed"] | null | null | false |
+| Show rejected invoices | DATABASE | invoice | list | [verification_status == "Rejected"] | null | null | false |
+| Show invoices older than 7 days | DATABASE | invoice | list | [uploaded_at <= "7 days ago"] | null | null | false |
+| Which invoices are still unpaid? | DATABASE | invoice | list | [payment_status == "Pending"] | null | null | false |
+| Show GST mismatches | DATABASE | alert | list | [alert_type == "GST Mismatch"] | null | null | false |
+| Show duplicate invoices | DATABASE | alert | list | [alert_type == "Duplicate"] | null | null | false |
+| Show bank mismatches | DATABASE | alert | list | [alert_type == "Bank Mismatch"] | null | null | false |
+| Show critical alerts | DATABASE | alert | list | [severity == "high"] | null | null | false |
+| Invoices requiring manual review | DATABASE | invoice | list | [verification_status == "Unverified"] | null | null | false |
+| Highest risk score | DATABASE | invoice | list | [] | null | risk_score desc | false | limit 1 |
+| Compare Dell and Metro spending | DATABASE | invoice | aggregate | [] | sum | total_amount | vendor_id | false | (Narrated by LLM) |
+| Which vendor submitted the most invoices? | DATABASE | invoice | aggregate | [] | count | null | vendor_id | false |
+| Lowest trust score vendor | DATABASE | vendor | list | [] | null | trust_score asc | false | limit 1 |
+| Show IT department invoices | DATABASE | invoice | list | [department == "IT"] | null | null | false |
+| Compare department spending | DATABASE | invoice | aggregate | [] | sum | total_amount | department | false |
+| Total spending this month | DATABASE | invoice | aggregate | [] | sum | total_amount | invoice_date | false |
+| Invoices above ₹1 lakh | DATABASE | invoice | list | [total_amount > 100000] | null | null | false |
+| Average invoice value | DATABASE | invoice | aggregate | [] | avg | total_amount | null | false |
+| Monthly GST collected | DATABASE | invoice | aggregate | [] | sum | tax_amount | invoice_date | false |
+| Monthly procurement spending | DATABASE | invoice | aggregate | [] | sum | total_amount | invoice_date | false |
+| Find rejected invoices with GST mismatch | DATABASE | invoice | list | [verification_status == "Rejected", alert.alert_type == "GST Mismatch"] | null | null | false |
+"""
+    elif user_role == "cfo":
+        role_examples = """
+| Summarize today's financial health | DATABASE | invoice | aggregate | [uploaded_at >= "today"] | sum | total_amount | null | false | (Narrated by LLM) |
+| Compare IT and Admin | DATABASE | invoice | aggregate | [department in ["IT", "Admin"]] | sum | total_amount | department | false | (Narrated by LLM) |
+| Generate a monthly spend report | DATABASE | invoice | aggregate | [] | sum | total_amount | invoice_date | false | (Narrated by LLM) |
+| Compare our top vendors | DATABASE | invoice | aggregate | [] | sum | total_amount | vendor_id | false | (Narrated by LLM) |
+| What happened this month? | DATABASE | invoice | aggregate | [invoice_date contains "this month"] | sum | total_amount | null | false | (Narrated by LLM) |
+| Generate vendor performance report | DATABASE | vendor | list | [] | null | total_spent desc | false | (Narrated by LLM) |
+| Why did IT spending increase? | DATABASE | invoice | list | [department == "IT"] | null | null | false | (Narrated by LLM due to INSIGHT_PATTERN) |
+"""
+    else:
+        role_examples = """
+| How many invoices? | DATABASE | invoice | aggregate | [] | count | null | false |
+| List all invoices | DATABASE | invoice | list | [] | null | invoice_date desc | false |
+| Invoices from May 2026 | DATABASE | invoice | list | [invoice_date contains "2026-05"] | null | null | false |
+| Compare this month and last month | DATABASE | invoice | list | [invoice_date >= "first day of last month", invoice_date <= "last day of this month"] | null | invoice_date asc | true |
+| Summarize the latest invoice / last uploaded | DATABASE | invoice | list | [] | null | uploaded_at desc | true | limit 1 |
+| Show my monthly revenue trend | DATABASE | invoice | aggregate | [] | sum | total_amount | invoice_date | false |
+| What is my total revenue from TechNova? | DATABASE | invoice | aggregate | [] | sum | total_amount | null | false |
+| Did AI extract my invoice correctly? | DOCUMENT_SEARCH | invoice | list | [] | null | null | false |
+| Latest invoice | DATABASE | invoice | list | [] | null | invoice_date desc | false | limit 1 |
+| Oldest invoice | DATABASE | invoice | list | [] | null | invoice_date asc | false | limit 1 |
+| Total spending | DATABASE | invoice | aggregate | [] | sum | total_amount | null | false |
+| Highest invoice | DATABASE | invoice | list | [] | null | total_amount desc | false | limit 1 |
+| Unverified invoices | DATABASE | invoice | list | [verification_status == "Unverified"] | null | null | false |
+| Pending invoices | DATABASE | invoice | list | [payment_status == "Pending"] | null | null | false |
+| Invoices over ₹1500 | DATABASE | invoice | list | [total_amount > 1500] | null | null | false |
+| Which invoice has Hot Coffee? | DATABASE | invoice | list | [line_item.description contains "Hot Coffee"] | null | null | true |
+| Total spent on coffee | DATABASE | line_item | aggregate | [description contains "coffee"] | sum | amount | null | false |
+| Most frequent item | DATABASE | line_item | aggregate | [] | count | null | description | false |
+"""
+
+    prompt_text = f"""{history_str}{context_str}{date_context}--- CURRENT USER QUESTION ---
+"{query}"
+-----------------------------
+
+## Four-Tier Routing Architecture
+
+You must classify the user's query into exactly one of these routes:
+
+### 1. WORKFLOW (Human-in-the-Loop Confirmation)
+Use for ANY request to MUTATE data or initiate an enterprise workflow:
+- Approve an invoice ("Approve invoice MTR-2026-6666")
+- Reject an invoice ("Reject invoice OBH-2026-9999")
+- Mark as paid, assign a reviewer, etc.
+CRITICAL: The AI NEVER directly mutates the database. Returning WORKFLOW triggers the backend to show a confirmation summary and ask the user to confirm their action.
+
+### 2. DATABASE
+Use for ANY structured data lookup, aggregation, filtering, or counting:
+- Counts, aggregations (sum/avg), sorting
+- Status checks (payment_status, verification_status)
+- Item/spend lookups, vendor profiles, fraud/alerts
+- Hybrid RAG prep (e.g., invoices > 1500 with French Fries)
+
+### 3. DOCUMENT_SEARCH
+Use ONLY for reading rich text that requires the actual invoice document:
+- Summarize a specific invoice
+- Payment terms, bank details, explanations for risk/anomalies
+
+### 4. GENERAL
+Use ONLY for greetings or general non-financial knowledge.
+
+---
+
+## Action Plan (REQUIRED when route == WORKFLOW)
+Emit a `workflow_plan` object:
+{{
+  "action_type": "approve_invoice" | "reject_invoice",
+  "invoice_number": "target invoice number if specified"
+}}
+
+---
+
+## Query Plan (REQUIRED when route == DATABASE)
+Emit a `query_plan` object. The executor safely handles this.
+MULTI-TURN CONTEXT: When analyzing the CURRENT USER QUESTION, refer to the chat history above. If the user asks a follow-up (e.g. 'Only approved ones'), you MUST combine this new filter with the filters from the previous query plan to maintain context!
+Schema:
+{{
+  "type": "aggregate" | "list",
+  "entity": "invoice" | "line_item" | "alert" | "vendor",
+  "filters": [
+      {{"field": "...", "op": "...", "value": "..."}}
+  ],
+  "aggregate_fn": "sum" | "avg" | "count" | "min" | "max" | null,
+  "aggregate_field": "total_amount" | "tax_amount" | "amount" | null,
+  "group_by": "description" | "category" | "department" | "vendor_id" | null,
+  "sort_field": "total_amount" | "invoice_date" | "tax_amount" | null,
+  "sort_dir": "asc" | "desc" | null,
+  "limit": integer | null,
+  "include_items": true | false
+}}
+
+### Supported Entities & Fields:
+
+**entity: invoice**
+- invoice_number (text), invoice_date (text), due_date (text), uploaded_at (text)
+- payment_status (text: "Pending", "Paid")
+- verification_status (text: "Approved", "Rejected", "Vendor Confirmed", "Paid", "Unverified")
+  - "Approved" / "Rejected" = processed by Finance Team
+  - "Vendor Confirmed" = pending approval
+  - "Unverified" = uploaded, not yet reviewed
+- risk_score (number), vendor_id (number), department (text)
+- total_amount (amount), tax_amount (amount)
+- Cross-filters: line_item.description, line_item.category, alert.alert_type, alert.severity
+
+**entity: line_item**
+- description (text), category (text), amount (amount)
+
+**entity: alert**
+- alert_type (text: "Duplicate", "GST Mismatch", "Bank Mismatch"), severity (text: "low", "medium", "high", "critical")
+
+**entity: vendor**
+- name, gstin, trust_score, total_spent, is_verified, duplicate_invoices, compliance_issues
+
+### Routing Examples for Your Persona ({user_role}):
+
+{role_examples}
+
+---
+
+## Filters (Top-level) — Coreference Resolution
+Extract metadata filters (`vendor_name`, `invoice_number`) by resolving the FULL conversational context.
+1. If the current question explicitly names an invoice or vendor → use that name.
+2. If using a pronoun ("it", "the invoice") AND the previous conversation mentioned a specific invoice → inherit that invoice_number.
+
+Return a JSON object ONLY (no markdown):
+{{"route": "DATABASE" | "DOCUMENT_SEARCH" | "GENERAL" | "WORKFLOW", "query_plan": {{...}} | null, "workflow_plan": {{"action_type": "...", "invoice_number": "..."}} | null, "filters": {{"vendor_name": null, "invoice_number": null, "document_type": null, "item_name": null}}, "search_query": "..."}}"""
+
+# Load environment variables from .env manually to avoid extra dependencies
+_env_loaded = False
+
+def load_env_file():
+    global _env_loaded
+    if _env_loaded:
+        return
+    # Find .env at backend root
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env_path = os.path.join(base_dir, ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip().strip('"\'')
+    _env_loaded = True
+
+# Lazy-loaded clients
+_gemini_client = None
+_openai_client = None
+
+def get_llm_client(purpose: str = "ocr"):
+    """
+    Initializes and returns the appropriate LLM client based on purpose:
+    - "ocr": Prioritizes Gemini
+    - "assistant": Prioritizes NVIDIA NIM
+    """
+    global _gemini_client, _openai_client
+    load_env_file()
+
+    # --- Assistant Flow: Prioritize NVIDIA NIM ---
+    if purpose == "assistant":
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            if _openai_client is None:
+                try:
+                    from openai import OpenAI
+                    _openai_client = OpenAI(
+                        base_url="https://integrate.api.nvidia.com/v1",
+                        api_key=nvidia_key
+                    )
+                    os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b" # Force nemotron-3-super-120b-a12b
+                except Exception as e:
+                    print(f"[LLM Service] NVIDIA init error: {e}")
+            if _openai_client:
+                return "openai", _openai_client
+
+    # --- OCR Flow: Prioritize Gemini ---
+    if purpose == "ocr":
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_key:
+            if _gemini_client is None:
+                try:
+                    from google import genai
+                    _gemini_client = genai.Client(api_key=gemini_key)
+                except Exception as e:
+                    print(f"[LLM Service] Gemini (New SDK) init error: {e}")
+            if _gemini_client:
+                return "gemini", _gemini_client
+
+    # --- Fallbacks (if primary for the purpose fails) ---
+    
+    # 1. Google Gemini (New SDK) - as a fallback for assistant if NVIDIA fails
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_key and purpose == "assistant":
+        if _gemini_client is None:
+            try:
+                from google import genai
+                _gemini_client = genai.Client(api_key=gemini_key)
+            except Exception as e:
+                pass
+        if _gemini_client:
+            return "gemini", _gemini_client
+
+    # 2. NVIDIA NIM - as a fallback for OCR if Gemini fails
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key and purpose == "ocr":
+        if _openai_client is None:
+            try:
+                from openai import OpenAI
+                _openai_client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
+                os.environ["LLM_MODEL"] = "nvidia/nemotron-3-super-120b-a12b"
+            except Exception as e:
+                pass
+        if _openai_client:
+            return "openai", _openai_client
+
+    # 3. OpenAI or OpenRouter (Generic Fallback)
+    openai_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    if openai_key:
+        if _openai_client is None:
+            try:
+                from openai import OpenAI
+                base_url = "https://openrouter.ai/api/v1" if os.environ.get("OPENROUTER_API_KEY") else None
+                _openai_client = OpenAI(api_key=openai_key, base_url=base_url)
+            except Exception as e:
+                print(f"[LLM Service] OpenAI init error: {e}")
+        if _openai_client:
+            return "openai", _openai_client
+
+    return None, None
+
+
+def call_llm_structured_extraction(ocr_text: str) -> Optional[str]:
+    """
+    Extracts structured fields from raw OCR text, prioritizing Gemini.
+    """
+    if not ocr_text or not ocr_text.strip():
+        return None
+
+    provider, client = get_llm_client(purpose="ocr")
+
+    prompt = f"""
+Analyze this noisy OCR text from an invoice/receipt. Extract the key summary fields and the line-items table.
+
+Please scan the document for the following important fields, looking for any of the listed English or multilingual synonyms. Normalize them to the standard JSON keys listed below:
+
+1. "supplier_name": Supplier/Vendor name, issuer, shop name, merchant.
+2. "supplier_address": Supplier/Vendor address, location. Autocorrect any obvious OCR typos or character misrecognitions in addresses (e.g. 'Benoaluru', 'Benoaturu', or 'Bentaluru' should be corrected to 'Bengaluru').
+3. "supplier_gstin": Supplier GSTIN, Tax ID, Tax Registration Number, VAT ID, business ID.
+4. "invoice_number": Invoice number, bill number, receipt number, doc ref (max 16 chars, letters/numbers/hyphens/slashes only).
+5. "invoice_date": Invoice date, bill date, date of issue, transaction date (format: YYYY-MM-DD or DD/MM/YYYY).
+6. "buyer_name": Buyer/Customer name, bill to, recipient.
+7. "buyer_address": Buyer address.
+8. "buyer_gstin": Buyer GSTIN, customer Tax ID/VAT.
+9. "place_of_supply": Place of supply (delivery state/location determining intra-state vs inter-state tax).
+10. "hsn_sac": HSN/SAC code (classification code for goods/services).
+11. "taxable_value": Taxable amount, subtotal, pre-tax value, net amount.
+12. "tax_rate": Tax rate (CGST/SGST or IGST rate %, VAT %, sales tax rate).
+13. "tax_amount": CGST/SGST amount, IGST amount, VAT amount, total tax amount.
+14. "total_amount": Grand total, total invoice value, total amount to pay, gross amount.
+15. "signature_present": Signature present (physical or digital / stamp) — return true/false or null.
+16. "reverse_charge": Reverse charge applicability (Y/N, true/false, or null).
+17. "shipping_address": Shipping address, delivery address (if different from billing address).
+18. "transit_ref": Delivery challan, e-way bill reference, consignment note, tracking ref.
+19. "bank_account_number": Supplier bank account number, IBAN, or account details.
+
+If any field is not found in the text, return null for its value. If any other key summary fields are present (e.g. order_id, table_number, pay_mode, tip, service charge, phone_number), extract them as key-value pairs at the root level of the JSON using descriptive snake_case keys.
+
+Table Extraction:
+Extract the line-items table as a 2D matrix under the "table" key. The first list should contain the exact column headers found (e.g. ["Item", "Qty", "Rate", "Total"]). Subsequent lists should contain the corresponding row values.
+
+Crucial Table Guidelines:
+1. Fix any line wrapping or column alignment errors.
+2. Autocorrect Gibberish/Garbled Text: OCR engines sometimes misrecognize letters, noise, or paper folds, producing gibberish words. Use context clues, nearby product lines, common industry terminology, and general catalog knowledge to reconstruct the correct names.
+3. Mathematical Consistency:
+   - For every row, ensure `Rate * Qty = Amount` (within rounding).
+   - For the whole table, the sum of all item row `Amount` values must equal the invoice's Grand Total / `total_amount`.
+   - Concatenation Check: OCR engines often merge the quantity digit with the amount (e.g. reading '6 16314.00' as '616314.00' or '2 1470.00' as '21470.00'). Detect these anomalies using the Grand Total sum constraint and split them back into their correct separate columns so that all math constraints align.
+
+OCR Confidence Metadata:
+Some text segments in the OCR output below are prefixed with [LOW_CONFIDENCE]. These are segments where the OCR engine had very low recognition confidence or where automated analysis detected likely gibberish patterns (e.g. excessive character repetition, non-English character sequences). For these segments:
+- Use surrounding context, common product/item names, and invoice structure to reconstruct the correct text.
+- Pay special attention to table cells marked [LOW_CONFIDENCE] — the column position is usually correct even if the text is garbled.
+- Common OCR substitution errors include: 0↔O, 1↔l↔I, 5↔S, 8↔B, rn→m. Some of these have already been auto-corrected but others may remain.
+
+Expected JSON Structure:
+{{
+  "supplier_name": "string or null",
+  "supplier_address": "string or null",
+  "supplier_gstin": "string or null",
+  "invoice_number": "string or null",
+  "invoice_date": "string or null",
+  "buyer_name": "string or null",
+  "buyer_address": "string or null",
+  "buyer_gstin": "string or null",
+  "place_of_supply": "string or null",
+  "hsn_sac": "string or null",
+  "taxable_value": number or null,
+  "tax_rate": "string or number or null",
+  "tax_amount": number or null,
+  "total_amount": number or null,
+  "signature_present": boolean or null,
+  "reverse_charge": boolean or null,
+  "shipping_address": "string or null",
+  "transit_ref": "string or null",
+  "bank_account_number": "string or null",
+  ... (any other key summary fields present in the text) ...,
+  "table": [
+    ["Column 1 Header", "Column 2 Header", ...],
+    ["Row 1 Cell 1", "Row 1 Cell 2", ...],
+    ["Row 2 Cell 1", "Row 2 Cell 2", ...]
+  ]
+}}
+
+Noisy OCR Text:
+{ocr_text}
+
+Return ONLY the raw JSON block. No markdown explanation.
+"""
+
+    try:
+        if provider == "gemini":
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(temperature=0)
+            except Exception:
+                config = {"temperature": 0}
+            response = client.models.generate_content(
+                model="gemma-4-31b-it",
+                contents=prompt,
+                config=config
+            )
+            return response.text.strip()
+        elif provider == "openai":
+            model = os.environ.get("LLM_MODEL", "gpt-4o-mini" if not os.environ.get("OPENROUTER_API_KEY") else "google/gemma-4-31b-it")
+            response = client.chat.completions.create(
+                model=model,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[LLM Service] Structured extraction failed: {e}")
+    return None
+
+
+def call_llm_categorize_items(descriptions: List[str]) -> List[str]:
+    """
+    Takes a list of line item descriptions and returns a corresponding list of standard categories.
+    """
+    fallback = ["Uncategorized"] * len(descriptions)
+    if not descriptions:
+        return []
+
+    provider, client = get_llm_client(purpose="ocr")
+    if not provider or not client:
+        return fallback
+
+    numbered = "\n".join(f"{i}: {d}" for i, d in enumerate(descriptions))
+    prompt = f"""Categorize each of the following invoice line items into ONE short, consistent
+category label (e.g. "Beverages", "Snacks", "Bakery", "Main Course", "Software",
+"Office Supplies", "Travel", "Utilities", "Professional Services", "Other").
+
+Use the SAME category label every time for the same type of item across calls —
+consistency matters more than granularity. Prefer coarse, reusable categories
+over overly specific ones.
+
+Items (index: description):
+{numbered}
+
+Return ONLY a JSON object mapping each index (as a string) to its category label,
+no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
+
+    try:
+        raw = None
+        if provider == "gemini":
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(temperature=0)
+            except Exception:
+                config = {"temperature": 0}
+            response = client.models.generate_content(
+                model="gemma-4-31b-it",
+                contents=prompt,
+                config=config
+            )
+            raw = response.text.strip().removeprefix("```json").removesuffix("```").strip()
+        elif provider == "openai":
+            model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+            response = client.chat.completions.create(
+                model=model_name,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            raw = response.choices[0].message.content.strip()
+
+        if not raw:
+            return fallback
+
+        mapping = json.loads(raw)
+        return [mapping.get(str(i), "Uncategorized") for i in range(len(descriptions))]
+    except Exception as e:
+        print(f"[LLM Service] Categorization failed: {e}")
+        return fallback
+
+
+def call_llm_assistant_intent(query: str, chat_history: list = None, frontend_context: dict = None, user_role: str = "vendor", user_email: str = "") -> Optional[dict]:
+    """
+    Analyzes the user's query and determines the intent, prioritizing NVIDIA NIM.
+    """
+    load_env_file()
+
+    # Widened from 2 to 6 turns to match call_llm_rag_answer's window, so
+    # pronoun/filter resolution ("what about that invoice?", "which one")
+    # has the same amount of context available in both calls.
+    history_str = ""
+    if chat_history:
+        history_str = "--- PREVIOUS CONVERSATION CONTEXT ---\n" + "\n".join(
+            [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in chat_history[-6:]]
+        ) + "\n-------------------------------------\n\n"
+
+    context_str = ""
+    if frontend_context:
+        context_str = f"--- FRONTEND CONTEXT ---\nThe user is currently looking at this page on the UI: {json.dumps(frontend_context)}\nUse this to understand vague pronouns like 'this invoice' or 'these vendors'.\n------------------------\n\n"
+
+    import datetime
+    current_date = datetime.date.today().strftime("%Y-%m-%d")
+    date_context = f"--- CURRENT DATE ---\nToday is {current_date}. Use this to resolve relative dates like 'today', 'this month' (which would be {current_date[:7]}), etc.\n--------------------\n\n"
+
+    prompt_text = f"""{history_str}{context_str}{date_context}--- CURRENT USER QUESTION ---
 "{query}"
 -----------------------------
 
@@ -342,6 +806,7 @@ Use ONLY for:
 ## Query Plan (REQUIRED when route == DATABASE)
 
 Emit a `query_plan` object. The executor safely handles this — you never write SQL.
+CRITICAL: You MUST use the exact JSON keys shown in the schema below. Do NOT hallucinate keys like 'operation_type' or 'aggregation'.
 
 Schema:
 {{
@@ -396,6 +861,11 @@ Supported Operators (op): >, <, >=, <=, ==, !=, contains
 | How many invoices? | DATABASE | invoice | aggregate | [] | count | null | false |
 | List all invoices | DATABASE | invoice | list | [] | null | invoice_date desc | false |
 | Invoices from May 2026 | DATABASE | invoice | list | [invoice_date contains "2026-05"] | null | null | false |
+| Compare this month and last month | DATABASE | invoice | list | [invoice_date >= "first day of last month", invoice_date <= "last day of this month"] | null | invoice_date asc | true |
+| Summarize the latest invoice / last uploaded | DATABASE | invoice | list | [] | null | uploaded_at desc | true | limit 1 |
+| Show my monthly revenue trend | DATABASE | invoice | aggregate | [] | sum | total_amount | invoice_date | false |
+| What is my total revenue from TechNova? | DATABASE | invoice | aggregate | [] | sum | total_amount | null | false |
+| Did AI extract my invoice correctly? | DOCUMENT_SEARCH | invoice | list | [] | null | null | false |
 | Latest invoice | DATABASE | invoice | list | [] | null | invoice_date desc | false | limit 1 |
 | Oldest invoice | DATABASE | invoice | list | [] | null | invoice_date asc | false | limit 1 |
 | Total spending | DATABASE | invoice | aggregate | [] | sum | total_amount | null | false |
@@ -732,6 +1202,7 @@ The logged-in user is a VENDOR ({user_email or 'vendor'}).
 - Keep answers focused. Do not overwhelm with data — pick the most relevant facts.
 - For invoice questions: show the vendor what was extracted, confirm totals, flag any discrepancies.
 - For business advice questions: give 2–3 actionable recommendations based on their data.
+- Note: TechNova is the customer (the company receiving the invoices). The vendor's revenue is simply the sum of all their invoices sent to TechNova.
 
 {COMMON_RULES}"""
 
@@ -807,33 +1278,47 @@ You help businesses understand invoices, vendors, expenses, and fraud risks.
     import asyncio
     try:
         if provider == "gemini":
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemma-4-31b-it",
-                contents=prompt,
-                config={"response_modalities": ["TEXT"]}
-            )
-            # Gemini Python SDK doesn't natively support async streams well in all versions, 
-            # so we'll simulate streaming by chunking the text if native stream fails or just stream it.
-            # We'll use the blocking stream and yield it in an async generator.
-            stream_response = client.models.generate_content_stream(
-                model="gemma-4-31b-it",
-                contents=prompt
-            )
-            for chunk in stream_response:
+            def _get_gemini_stream():
+                return client.models.generate_content_stream(
+                    model="gemma-4-31b-it",
+                    contents=prompt
+                )
+            stream_response = await asyncio.to_thread(_get_gemini_stream)
+            
+            def _get_next_chunk(iterator):
+                try:
+                    return next(iterator)
+                except StopIteration:
+                    return None
+
+            # Fetch chunks asynchronously to avoid blocking the event loop
+            while True:
+                chunk = await asyncio.to_thread(_get_next_chunk, stream_response)
+                if chunk is None:
+                    break
                 if chunk.text:
                     yield chunk.text
-                    await asyncio.sleep(0.01) # Small yield to event loop
         elif provider == "openai":
             model_name = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                stream=True
-            )
-            for chunk in response:
+            def _get_openai_stream():
+                return client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=True
+                )
+            response = await asyncio.to_thread(_get_openai_stream)
+            
+            def _get_next_chunk_openai(iterator):
+                try:
+                    return next(iterator)
+                except StopIteration:
+                    return None
+
+            while True:
+                chunk = await asyncio.to_thread(_get_next_chunk_openai, response)
+                if chunk is None:
+                    break
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
-                    await asyncio.sleep(0.01)
     except Exception as e:
         yield f"\n\nError generating answer stream: {str(e)}"

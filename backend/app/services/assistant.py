@@ -13,7 +13,7 @@ from app.services.query_engine import execute_query_plan, format_query_result, Q
 
 # Questions that need an LLM to narrate the SQL results, not just dump the raw list.
 _INSIGHT_PATTERN = re.compile(
-    r"\b(trend|pattern|recommend|unusual|anomal|review|insight|analysis|frequent|most|compare|explain|why|risk)\b",
+    r"\b(why|trend|reason|explain|analyze|break down|insight|highest|most|report|summary|forecast|predict|compare|health|attention)\b",
     re.IGNORECASE,
 )
 
@@ -147,6 +147,11 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None, vend
         search_filters = filters.copy()
         if vendor_id:
             search_filters["vendor_id"] = vendor_id
+            
+        if resolved_invoice:
+            inv_obj = _resolve_invoice_id(db, resolved_invoice, vendor_id)
+            if inv_obj and inv_obj.document_id:
+                search_filters["document_id"] = inv_obj.document_id
 
         docs = knowledge_engine.semantic_search(db, search_query, top_k=top_k, filters=search_filters)
         
@@ -216,7 +221,56 @@ async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=Non
     route = intent_data.get("route", "DOCUMENT_SEARCH")
     filters = intent_data.get("filters", {})
     
-    _INSIGHT_PATTERN = re.compile(r"\b(why|trend|reason|explain|analyze|break down|insight|highest|most)\b", re.IGNORECASE)
+    _INSIGHT_PATTERN = re.compile(r"\b(why|trend|reason|explain|analyze|break down|insight|highest|most|report|summary|forecast|predict|compare|health|attention)\b", re.IGNORECASE)
+
+    if route == "WORKFLOW":
+        workflow_plan = intent_data.get("workflow_plan", {})
+        action_type = workflow_plan.get("action_type")
+        target_invoice = workflow_plan.get("invoice_number") or filters.get("invoice_number")
+        
+        if not action_type or not target_invoice:
+            yield f"data: {json.dumps({'sources': []})}\n\n"
+            yield f"data: {json.dumps({'chunk': 'I could not determine which invoice you want to act on.'})}\n\n"
+            return
+            
+        resolved_inv = _resolve_invoice_id(db, target_invoice, vendor_id)
+        if not resolved_inv:
+            yield f"data: {json.dumps({'sources': []})}\n\n"
+            yield f"data: {json.dumps({'chunk': f'I could not find invoice {target_invoice}.'})}\n\n"
+            return
+
+        is_confirmation = query.strip().lower() in ["yes", "confirm", "approve", "do it", "yes, approve it", "yes, reject it", "reject"]
+        last_msg = chat_history[-1]["content"].lower() if chat_history else ""
+        was_asked = "would you like me to" in last_msg or "confirm" in last_msg
+        
+        if is_confirmation or was_asked:
+            if action_type == "approve_invoice":
+                resolved_inv.verification_status = "Approved"
+            elif action_type == "reject_invoice":
+                resolved_inv.verification_status = "Rejected"
+            else:
+                yield f"data: {json.dumps({'sources': []})}\n\n"
+                yield f"data: {json.dumps({'chunk': f'Unsupported action type: {action_type}.'})}\n\n"
+                return
+                
+            db.commit()
+            status_word = "approved" if action_type == "approve_invoice" else "rejected"
+            yield f"data: {json.dumps({'sources': []})}\n\n"
+            yield f"data: {json.dumps({'chunk': f'Invoice {resolved_inv.invoice_number} has been successfully {status_word}.'})}\n\n"
+            return
+        else:
+            verb = "approve" if action_type == "approve_invoice" else "reject"
+            vendor_name = "Unknown"
+            if resolved_inv.vendor_id:
+                from app.db import models
+                vendor = db.query(models.Vendor).filter(models.Vendor.id == resolved_inv.vendor_id).first()
+                if vendor:
+                    vendor_name = vendor.name
+            
+            chunk = f"I found Invoice **{resolved_inv.invoice_number}** from **{vendor_name}** for **₹{resolved_inv.total_amount}**.\n\nRisk Score is {resolved_inv.risk_score} and status is {resolved_inv.verification_status}.\n\nWould you like me to **{verb}** it? Please reply 'Yes' to confirm."
+            yield f"data: {json.dumps({'sources': []})}\n\n"
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            return
 
     if route == "DATABASE":
         query_plan = intent_data.get("query_plan")
@@ -289,6 +343,11 @@ async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=Non
         search_filters = filters.copy()
         if vendor_id:
             search_filters["vendor_id"] = vendor_id
+            
+        if resolved_invoice:
+            inv_obj = _resolve_invoice_id(db, resolved_invoice, vendor_id)
+            if inv_obj and inv_obj.document_id:
+                search_filters["document_id"] = inv_obj.document_id
 
         docs = knowledge_engine.semantic_search(db, search_query, top_k=top_k, filters=search_filters)
         

@@ -57,12 +57,14 @@ INVOICE_SQL_FIELDS = {
     "invoice_date": (models.Invoice.invoice_date, "text"),
     "due_date": (models.Invoice.due_date, "text"),
     "department": (models.Invoice.department, "text"),
+    "uploaded_at": (models.Invoice.uploaded_at, "text"),
 }
 INVOICE_AMOUNT_FIELDS = {"total_amount", "tax_amount", "subtotal"}  # handled in Python
 
 LINE_ITEM_SQL_FIELDS = {
     "description": (models.LineItem.description, "text"),
     "category": (models.LineItem.category, "text"),
+    "invoice_id": (models.LineItem.invoice_id, "number"),
 }
 LINE_ITEM_AMOUNT_FIELDS = {"amount"}  # handled in Python
 
@@ -84,7 +86,7 @@ VENDOR_SQL_FIELDS = {
     "ifsc": (models.Vendor.ifsc, "text"),
 }
 
-CROSS_FIELDS = {"line_item.description", "line_item.category"}  # only valid when entity == "invoice"
+CROSS_FIELDS = {"line_item.description", "line_item.category", "alert.alert_type", "alert.severity"}  # only valid when entity == "invoice"
 
 ALLOWED_OPS = {">", "<", ">=", "<=", "==", "!=", "contains"}
 ALLOWED_AGG_FNS = {"sum", "avg", "count", "min", "max"}
@@ -131,15 +133,21 @@ def _field_lookup(entity: str, field: str):
 
 
 def _apply_sql_filter(query, column, op, value, value_type):
-    if op == "contains":
-        return query.filter(column.ilike(f"%{value}%"))
     if value_type == "text":
-        # Case-insensitive equality by default — statuses like
-        # "Verified"/"verified" shouldn't be a matching footgun.
+        if op == "contains":
+            return query.filter(column.ilike(f"%{value}%"))
         if op == "==":
             return query.filter(column.ilike(str(value)))
         if op == "!=":
             return query.filter(~column.ilike(str(value)) | column.is_(None))
+        if op == ">":
+            return query.filter(column > str(value))
+        if op == "<":
+            return query.filter(column < str(value))
+        if op == ">=":
+            return query.filter(column >= str(value))
+        if op == "<=":
+            return query.filter(column <= str(value))
         raise QueryPlanError(f"Operator '{op}' not supported for text field")
     # numeric column (e.g. risk_score, vendor_id)
     if op == ">":
@@ -220,12 +228,19 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
     # Cross-entity filters (only meaningful for entity == "invoice"):
     # "does this invoice have a line item matching X"
     for f in cross_filters:
-        sub_field = f["field"].split(".", 1)[1]  # "description" or "category"
-        column = LINE_ITEM_SQL_FIELDS[sub_field][0]
-        matching_invoice_ids = [
-            row[0] for row in
-            db.query(models.LineItem.invoice_id).filter(column.ilike(f"%{f['value']}%")).all()
-        ]
+        sub_entity, sub_field = f["field"].split(".", 1)
+        if sub_entity == "line_item":
+            column = LINE_ITEM_SQL_FIELDS[sub_field][0]
+            matching_invoice_ids = [
+                row[0] for row in
+                db.query(models.LineItem.invoice_id).filter(column.ilike(f"%{f['value']}%")).all()
+            ]
+        elif sub_entity == "alert":
+            column = ALERT_SQL_FIELDS[sub_field][0]
+            matching_invoice_ids = [
+                row[0] for row in
+                db.query(models.Invoice.id).join(models.InsightAlert, models.Invoice.document_id == models.InsightAlert.document_id).filter(column.ilike(f"%{f['value']}%")).all()
+            ]
         q = q.filter(models.Invoice.id.in_(matching_invoice_ids)) if matching_invoice_ids else q.filter(False)
 
     rows = q.all()
@@ -251,6 +266,8 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
                 groups: Dict[str, Dict[str, Any]] = {}
                 for r in rows:
                     key = str(getattr(r, group_by, "Unknown") or "Unknown").strip()
+                    if group_by == "invoice_date" and key != "Unknown" and len(key) >= 7:
+                        key = key[:7]
                     groups.setdefault(key, {"count": 0})
                     groups[key]["count"] += 1
                 return {"type": "aggregate", "fn": "count", "value": len(rows), "groups": groups}
@@ -282,6 +299,8 @@ def execute_query_plan(db, plan: Dict[str, Any], vendor_id: Optional[int] = None
                 if val is None:
                     continue
                 key = str(getattr(r, group_by, None) or "Unknown").strip()
+                if group_by == "invoice_date" and key != "Unknown" and len(key) >= 7:
+                    key = key[:7]
                 groups.setdefault(key, {"total": 0.0, "count": 0})
                 groups[key]["total"] += float(val)
                 groups[key]["count"] += 1
@@ -329,6 +348,8 @@ def format_query_result(plan: Dict[str, Any], result: Dict[str, Any]) -> str:
                 base += "\n\n**Breakdown:**\n" + "\n".join(lines)
             return base
         if value is None:
+            if result.get("skipped") == 0:
+                return "No matching records were found for your query."
             return "No matching records with a parseable amount were found."
 
         label = {"sum": "Total", "avg": "Average", "min": "Minimum", "max": "Maximum"}[fn]
