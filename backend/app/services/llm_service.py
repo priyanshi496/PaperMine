@@ -379,6 +379,8 @@ Use for ANY request to MUTATE data or initiate an enterprise workflow:
 - Approve an invoice ("Approve invoice MTR-2026-6666")
 - Reject an invoice ("Reject invoice OBH-2026-9999")
 - Mark as paid, assign a reviewer, etc.
+- Multi-turn confirmations: If the user replies "Yes", "Approve it", "Confirm", or "Do it" to a previous prompt, you MUST route to WORKFLOW.
+CRITICAL DISTINCTION: 'Show me approved invoices' is a DATABASE query. 'Approve this invoice' is a WORKFLOW action. Only use WORKFLOW for commands that take action.
 CRITICAL: The AI NEVER directly mutates the database. Returning WORKFLOW triggers the backend to show a confirmation summary and ask the user to confirm their action.
 
 ### 2. DATABASE
@@ -441,6 +443,7 @@ Schema:
 
 **entity: line_item**
 - description (text), category (text), amount (amount)
+- IMPORTANT: line_item does NOT have invoice_number. Filter the 'invoice' entity instead to search by invoice number.
 
 **entity: alert**
 - alert_type (text: "Duplicate", "GST Mismatch", "Bank Mismatch"), severity (text: "low", "medium", "high", "critical")
@@ -1111,7 +1114,8 @@ Same as above: provide an Executive Insight, followed by a breakdown table (with
 6. Preserve exact invoice numbers, dates, GSTINs, and amounts from the context.
 7. OCR may confuse 1/I/l, 0/O, 5/S — note this if flagging a discrepancy as fraud.
 8. If context does not contain the answer, say: "This information is not available in the indexed documents."
-9. Never invent values or reasons. Use ONLY the provided context chunks."""
+9. Never invent values or reasons. Use ONLY the provided context chunks.
+10. Do NOT use LaTeX formatting or math symbols like $\rightarrow$. Use plain text arrows (->) instead if needed."""
 
     retrieval_instructions = """**Instructions for using retrieved chunks:**
 1. Read ALL chunks before answering. Do not answer from only the first chunk.
@@ -1176,6 +1180,7 @@ async def call_llm_rag_answer_stream(query: str, context: str, chat_history: lis
 4. Always use **markdown formatting** — bold for amounts (₹), invoice numbers, statuses.
 5. Use ## and ### headings, bullet lists, and **markdown tables** where appropriate.
 6. Never answer in a single unformatted paragraph.
+7. Do NOT use LaTeX formatting or math symbols like $\rightarrow$. Use plain text arrows (->) instead if needed.
 """
 
     if is_general:
@@ -1321,4 +1326,8 @@ You help businesses understand invoices, vendors, expenses, and fraud risks.
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
     except Exception as e:
-        yield f"\n\nError generating answer stream: {str(e)}"
+        error_msg = str(e)
+        if "503" in error_msg or "UNAVAILABLE" in error_msg:
+            yield f"\n\n⚠️ **Server Overload:** The AI model is currently experiencing high demand. Please try asking your question again in a few seconds."
+        else:
+            yield f"\n\nError generating answer stream: {error_msg}"

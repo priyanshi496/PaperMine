@@ -45,6 +45,29 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None, vend
     route = intent_data.get("route", "DOCUMENT_SEARCH")
     filters = intent_data.get("filters", {})
 
+    # --- DETERMINISTIC ROUTING OVERRIDE ---
+    query_lower = query.strip().lower()
+    last_msg = chat_history[-1]["content"].lower() if chat_history else ""
+    was_asked = "would you like me to" in last_msg or "confirm" in last_msg
+    was_asked_reason = "please provide a reason for the rejection" in last_msg
+    is_confirmation = query_lower in ["yes", "confirm", "approve", "do it", "yes, approve it", "yes, reject it", "reject"]
+    is_explicit_cmd = "approve invoice" in query_lower or "reject invoice" in query_lower
+
+    if (was_asked and is_confirmation) or is_explicit_cmd or was_asked_reason:
+        route = "WORKFLOW"
+        if not intent_data.get("workflow_plan"):
+            m = re.search(r'[a-zA-Z]{3}-\d{4}-\d{4}', query)
+            target = m.group(0).upper() if m else filters.get("invoice_number")
+            if not target and chat_history:
+                matches = re.findall(r'[A-Z]{3}-\d{4}-\d{4}', str(chat_history))
+                if matches:
+                    target = matches[-1]
+            intent_data["workflow_plan"] = {
+                "action_type": "reject_invoice" if ("reject" in query_lower or was_asked_reason) else "approve_invoice",
+                "invoice_number": target
+            }
+    # --------------------------------------
+
     # Log which backend actually classified this — lets you compare Ollama
     # vs. the Gemini/OpenAI fallback's routing accuracy empirically instead
     # of guessing. Swap print() for your real logger.
@@ -100,17 +123,13 @@ def run_assistant_query(db: Session, query: str, chat_history: list = None, vend
                 db_result = execute_query_plan(db, query_plan, vendor_id=vendor_id)
                 formatted_data = format_query_result(query_plan, db_result)
 
-                # For analytical questions, feed the raw data to the LLM for a
-                # proper narrated answer instead of returning a terse list.
-                if _INSIGHT_PATTERN.search(query):
-                    narrated = call_llm_rag_answer(
-                        query,
-                        f"Here is the structured financial data from the database:\n\n{formatted_data}",
-                        chat_history
-                    )
-                    ans = narrated if narrated else formatted_data
-                else:
-                    ans = formatted_data
+                # Always feed the raw data to the LLM for a proper narrated answer
+                narrated = call_llm_rag_answer(
+                    query,
+                    f"The SQL database has computed the exact answer to the user's question. Result:\n{formatted_data}\n\nIMPORTANT: Treat this result as the final, correct answer. Do not complain about missing details. Simply formulate this result into a natural, helpful response.",
+                    chat_history
+                )
+                ans = narrated if narrated else formatted_data
 
                 return {
                     "answer": ans,
@@ -221,6 +240,30 @@ async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=Non
     route = intent_data.get("route", "DOCUMENT_SEARCH")
     filters = intent_data.get("filters", {})
     
+    # --- DETERMINISTIC ROUTING OVERRIDE ---
+    # Fixes LLM misclassifying "Approve invoice" or "Yes approve it" as DATABASE
+    query_lower = query.strip().lower()
+    last_msg = chat_history[-1]["content"].lower() if chat_history else ""
+    was_asked = "would you like me to" in last_msg or "confirm" in last_msg
+    was_asked_reason = "please provide a reason for the rejection" in last_msg
+    is_confirmation = query_lower in ["yes", "confirm", "approve", "do it", "yes, approve it", "yes, reject it", "reject"]
+    is_explicit_cmd = "approve invoice" in query_lower or "reject invoice" in query_lower
+
+    if (was_asked and is_confirmation) or is_explicit_cmd or was_asked_reason:
+        route = "WORKFLOW"
+        if not intent_data.get("workflow_plan"):
+            m = re.search(r'[a-zA-Z]{3}-\d{4}-\d{4}', query)
+            target = m.group(0).upper() if m else filters.get("invoice_number")
+            if not target and chat_history:
+                matches = re.findall(r'[A-Z]{3}-\d{4}-\d{4}', str(chat_history))
+                if matches:
+                    target = matches[-1]
+            intent_data["workflow_plan"] = {
+                "action_type": "reject_invoice" if ("reject" in query_lower or was_asked_reason) else "approve_invoice",
+                "invoice_number": target
+            }
+    # --------------------------------------
+    
     _INSIGHT_PATTERN = re.compile(r"\b(why|trend|reason|explain|analyze|break down|insight|highest|most|report|summary|forecast|predict|compare|health|attention)\b", re.IGNORECASE)
 
     if route == "WORKFLOW":
@@ -239,27 +282,45 @@ async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=Non
             yield f"data: {json.dumps({'chunk': f'I could not find invoice {target_invoice}.'})}\n\n"
             return
 
-        is_confirmation = query.strip().lower() in ["yes", "confirm", "approve", "do it", "yes, approve it", "yes, reject it", "reject"]
+        is_confirmation = query.strip().lower() in ["yes", "confirm", "approve", "do it", "yes, approve it"]
         last_msg = chat_history[-1]["content"].lower() if chat_history else ""
         was_asked = "would you like me to" in last_msg or "confirm" in last_msg
-        
-        if is_confirmation or was_asked:
-            if action_type == "approve_invoice":
-                resolved_inv.verification_status = "Approved"
-            elif action_type == "reject_invoice":
-                resolved_inv.verification_status = "Rejected"
-            else:
+        was_asked_reason = "please provide a reason for the rejection" in last_msg
+
+        if action_type == "reject_invoice":
+            if query.strip().lower() in ["no", "cancel", "stop", "abort"]:
                 yield f"data: {json.dumps({'sources': []})}\n\n"
-                yield f"data: {json.dumps({'chunk': f'Unsupported action type: {action_type}.'})}\n\n"
+                yield f"data: {json.dumps({'chunk': 'Rejection cancelled.'})}\n\n"
                 return
-                
+
+            if not was_asked_reason:
+                vendor_name = "Unknown"
+                if resolved_inv.vendor_id:
+                    from app.db import models
+                    vendor = db.query(models.Vendor).filter(models.Vendor.id == resolved_inv.vendor_id).first()
+                    if vendor:
+                        vendor_name = vendor.name
+                        
+                chunk = f"I found Invoice **{resolved_inv.invoice_number}** from **{vendor_name}** for **₹{resolved_inv.total_amount}**.\n\nWould you like me to reject it? **Please provide a reason for the rejection to confirm.**"
+                yield f"data: {json.dumps({'sources': []})}\n\n"
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                return
+            else:
+                resolved_inv.verification_status = "Rejected"
+                resolved_inv.rejection_reason = query.strip()
+                db.commit()
+                yield f"data: {json.dumps({'sources': []})}\n\n"
+                yield f"data: {json.dumps({'chunk': f'Invoice {resolved_inv.invoice_number} has been successfully rejected with reason: *{resolved_inv.rejection_reason}*'})}\n\n"
+                return
+
+        elif is_confirmation or (was_asked and action_type == "approve_invoice"):
+            resolved_inv.verification_status = "Approved"
             db.commit()
-            status_word = "approved" if action_type == "approve_invoice" else "rejected"
             yield f"data: {json.dumps({'sources': []})}\n\n"
-            yield f"data: {json.dumps({'chunk': f'Invoice {resolved_inv.invoice_number} has been successfully {status_word}.'})}\n\n"
+            yield f"data: {json.dumps({'chunk': f'Invoice {resolved_inv.invoice_number} has been successfully approved.'})}\n\n"
             return
         else:
-            verb = "approve" if action_type == "approve_invoice" else "reject"
+            verb = "approve"
             vendor_name = "Unknown"
             if resolved_inv.vendor_id:
                 from app.db import models
@@ -319,7 +380,9 @@ async def run_assistant_query_stream(db, query, chat_history=None, vendor_id=Non
                         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 else:
                     yield f"data: {json.dumps({'sources': [{'type': 'SQL Database', 'description': 'Executed Query Plan'}]})}\n\n"
-                    yield f"data: {json.dumps({'chunk': formatted_data})}\n\n"
+                    context = f"The SQL database has computed the exact answer to the user's question. Result:\n{formatted_data}\n\nIMPORTANT: Treat this result as the final, correct answer. Do not complain about missing details. Simply formulate this result into a natural, helpful response."
+                    async for chunk in call_llm_rag_answer_stream(query, context, chat_history, is_general=False, frontend_context=frontend_context, user_role=user_role, user_email=user_email):
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 return
             except QueryPlanError as e:
                 print(f"[QueryPlanError] Falling back to RAG due to: {e}")

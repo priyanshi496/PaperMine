@@ -386,7 +386,10 @@ def format_query_result(plan: Dict[str, Any], result: Dict[str, Any]) -> str:
             amt = clean_amount(r.amount) or 0.0
             lines.append(f"- {r.description} ({r.category or 'Uncategorized'}): ₹{amt:,.2f}")
         elif entity == "alert":
-            lines.append(f"- [{r.alert_type}] [{r.severity}] {r.message}")
+            inv = r.document.invoices[0] if r.document and r.document.invoices else None
+            inv_num = inv.invoice_number if inv else "Unknown"
+            v_name = inv.vendor.name if inv and getattr(inv, "vendor", None) else "Unknown"
+            lines.append(f"- Invoice: **{inv_num}** | Vendor: {v_name} | Alert: [{r.alert_type}] [{r.severity}] {r.message}")
         elif entity == "vendor":
             lines.append(
                 f"- **{r.name}** | GSTIN: {r.gstin or 'N/A'}"
