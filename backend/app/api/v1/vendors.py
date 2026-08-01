@@ -14,6 +14,76 @@ class VendorUpdateRequest(BaseModel):
     bank_account: str | None = None
     ifsc: str | None = None
 
+@router.get("/")
+def list_vendors(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in ["finance_team", "admin", "cfo"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    vendors = db.query(models.Vendor).all()
+    results = []
+    
+    for vendor in vendors:
+        # Calculate pending amount and count
+        pending_invoices = [inv for inv in vendor.invoices if inv.payment_status != "Paid" and inv.verification_status != "Rejected"]
+        pending_count = len(pending_invoices)
+        
+        pending_amount = 0
+        for inv in pending_invoices:
+            try:
+                if inv.total_amount:
+                    val = float(inv.total_amount.replace(",", ""))
+                    pending_amount += val
+            except:
+                pass
+                
+        total_invoices_count = len(vendor.invoices)
+
+        results.append({
+            "id": vendor.id,
+            "name": vendor.name or "Unnamed Vendor",
+            "gstin": vendor.gstin,
+            "department": vendor.department or "Unassigned",
+            "trust_score": vendor.trust_score,
+            "total_spent": vendor.total_spent,
+            "pending_amount": pending_amount,
+            "pending_count": pending_count,
+            "total_invoices_count": total_invoices_count,
+            "is_verified": vendor.is_verified == 1,
+            "bank_account": vendor.bank_account
+        })
+        
+    return results
+
+@router.get("/{vendor_id}")
+def get_vendor(
+    vendor_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in ["finance_team", "admin", "cfo"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+        
+    return {
+        "id": vendor.id,
+        "name": vendor.name or "Unnamed Vendor",
+        "gstin": vendor.gstin,
+        "department": vendor.department or "Unassigned",
+        "trust_score": vendor.trust_score,
+        "total_spent": vendor.total_spent,
+        "is_verified": vendor.is_verified == 1,
+        "bank_account": vendor.bank_account,
+        "ifsc": vendor.ifsc,
+        "address": vendor.address
+    }
+
+
 @router.put("/{vendor_id}")
 def update_master_profile(
     vendor_id: int, 

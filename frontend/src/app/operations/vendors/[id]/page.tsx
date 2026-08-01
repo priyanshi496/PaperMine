@@ -3,6 +3,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { useRouter, useParams } from "next/navigation";
 import {
   Table,
   TableBody,
@@ -18,27 +19,52 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Search, AlertTriangle, FileText, CheckCircle2, FileCheck2, Bot, Building2, CreditCard, Download, ArrowRight, ShieldCheck } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { usePageContext } from "@/context/PageContext";
 
-export default function InvoiceOperations() {
+export default function VendorInvoices() {
+  const params = useParams();
   const { authState, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const [vendor, setVendor] = useState<any | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [filtered, setFiltered] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const { setPageContext } = usePageContext();
   
   // Drawer State
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [invoiceDetails, setInvoiceDetails] = useState<any | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+
+  useEffect(() => {
+    setPageContext({ 
+      page: "Invoices", 
+      active_invoice: selectedInvoice?.id || undefined
+    });
+  }, [selectedInvoice, setPageContext]);
 
   useEffect(() => {
     if (!authLoading && authState.token) {
@@ -49,7 +75,15 @@ export default function InvoiceOperations() {
   const fetchInvoices = async () => {
     try {
       setLoading(true);
-      const res = await axios.get("http://localhost:8000/api/v1/invoices/");
+      
+      const vendorRes = await axios.get(`http://localhost:8000/api/v1/vendors/${params.id}`, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setVendor(vendorRes.data);
+
+      const res = await axios.get(`http://localhost:8000/api/v1/invoices/?vendor_id=${params.id}`, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
       setInvoices(res.data);
       setFiltered(res.data);
     } catch (e) {
@@ -87,6 +121,43 @@ export default function InvoiceOperations() {
     }
   };
 
+  const handleAction = async (action: "approve" | "reject", reason?: string) => {
+    if (!invoiceDetails) return;
+    try {
+      setActionLoading(true);
+      await axios.put(`http://localhost:8000/api/v1/invoices/${invoiceDetails.id}/action`, { action, reason }, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setInvoiceDetails({ 
+        ...invoiceDetails, 
+        verification_status: action === "approve" ? "Approved" : "Rejected",
+        rejection_reason: reason || invoiceDetails.rejection_reason
+      });
+      fetchInvoices();
+      if (action === "reject") {
+        setRejectDialogOpen(false);
+        setRejectionReason("");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDepartmentChange = async (val: string) => {
+    if (!invoiceDetails) return;
+    try {
+      await axios.put(`http://localhost:8000/api/v1/invoices/${invoiceDetails.id}/department`, { department: val }, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setInvoiceDetails({ ...invoiceDetails, department: val });
+      fetchInvoices();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const formatCurrency = (val: string) => {
     if (!val) return "₹0";
     const num = parseFloat(val.replace(/[^0-9.-]+/g,""));
@@ -95,9 +166,14 @@ export default function InvoiceOperations() {
 
   return (
     <div className="flex-1 p-8 space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">My Invoices</h1>
-        <p className="text-muted-foreground mt-1">Review your submitted invoices and verify AI extractions.</p>
+      <div className="flex items-center gap-4 mb-2">
+        <Button variant="ghost" size="icon" onClick={() => router.push("/operations/vendors")}>
+          <span className="material-symbols-outlined text-muted-foreground">arrow_back</span>
+        </Button>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">{vendor ? vendor.name : "Loading Vendor..."} Invoices</h1>
+          <p className="text-muted-foreground mt-1">Review, verify, and approve invoices for this vendor.</p>
+        </div>
       </div>
 
       <div className="flex items-center gap-4">
@@ -200,23 +276,31 @@ export default function InvoiceOperations() {
                       <Download className="w-3.5 h-3.5"/> PDF
                     </Button>
                     {authState.user?.role === "finance_team" ? (
-                      invoiceDetails.verification_status === "Vendor Confirmed" && (
-                        <Button variant="default" size="sm" className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground">
-                          Approve
-                        </Button>
+                      (invoiceDetails.verification_status !== "Approved" && invoiceDetails.verification_status !== "Rejected") && (
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            onClick={() => setRejectDialogOpen(true)}
+                            disabled={actionLoading}
+                          >
+                            Reject
+                          </Button>
+                          <Button 
+                            variant="default" 
+                            size="sm" 
+                            className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                            onClick={() => handleAction("approve")}
+                            disabled={actionLoading}
+                          >
+                            Approve
+                          </Button>
+                        </div>
                       )
                     ) : authState.user?.role === "vendor" ? (
                       invoiceDetails.verification_status === "Unverified" && (
-                        <Button 
-                          variant="default" 
-                          size="sm" 
-                          className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
-                          onClick={() => {
-                            if (invoiceDetails && invoiceDetails.id) {
-                              window.location.href = `/document/${selectedInvoice.document_id}`;
-                            }
-                          }}
-                        >
+                        <Button variant="default" size="sm" className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground">
                           Confirm & Submit
                         </Button>
                       )
@@ -280,6 +364,29 @@ export default function InvoiceOperations() {
                     <div>
                       <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider mb-2">Payment Terms</p>
                       <p className="font-semibold text-[15px] text-foreground">Net 30</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider mb-2">Department</p>
+                      {authState.user?.role === "finance_team" ? (
+                        <Select 
+                          value={invoiceDetails.department || ""} 
+                          onValueChange={handleDepartmentChange}
+                        >
+                          <SelectTrigger className="h-8 w-full text-sm font-semibold">
+                            <SelectValue placeholder="Select Department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="IT">IT</SelectItem>
+                            <SelectItem value="HR">HR</SelectItem>
+                            <SelectItem value="Admin">Admin</SelectItem>
+                            <SelectItem value="Cafeteria">Cafeteria</SelectItem>
+                            <SelectItem value="Sales">Sales</SelectItem>
+                            <SelectItem value="Marketing">Marketing</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="font-semibold text-[15px] text-foreground">{invoiceDetails.department || "Unassigned"}</p>
+                      )}
                     </div>
                   </div>
 
@@ -396,17 +503,25 @@ export default function InvoiceOperations() {
 
                           <div className="h-px bg-border/50 w-full mb-6" />
 
-                          {/* Items Found */}
+                          {/* Top 3 Line Items */}
                           <div className="mb-6">
-                             <h4 className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground mb-3">Items Found</h4>
-                             <ul className="space-y-3">
-                                {invoiceDetails.line_items.map((item: any) => (
-                                   <li key={item.id} className="flex items-start gap-2 text-[14px]">
-                                      <span className="text-muted-foreground mt-0.5">•</span>
-                                      <span>Categorized <strong>{item.description}</strong> as <Badge variant="secondary" className="text-[10px] px-1.5 py-0 uppercase mx-1">{item.category}</Badge></span>
+                             <h4 className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground mb-3">Top Line Items</h4>
+                             <ul className="space-y-3 mb-4">
+                                {invoiceDetails.line_items
+                                   .sort((a: any, b: any) => parseFloat(b.amount) - parseFloat(a.amount))
+                                   .slice(0, 3)
+                                   .map((item: any) => (
+                                   <li key={item.id} className="flex justify-between items-center text-[14px]">
+                                      <span className="font-medium truncate mr-4">{item.description}</span>
+                                      <span className="font-semibold whitespace-nowrap">₹{parseFloat(item.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                    </li>
                                 ))}
                              </ul>
+                             {invoiceDetails.line_items.length > 3 && (
+                                <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => setActiveTab("ocr")}>
+                                   View All {invoiceDetails.line_items.length} Items
+                                </Button>
+                             )}
                           </div>
 
                           <div className="h-px bg-border/50 w-full mb-6" />
@@ -538,22 +653,17 @@ export default function InvoiceOperations() {
                              <p className="text-[14.5px] font-semibold text-red-600">Finance Rejected</p>
                              <p className="text-xs text-red-500 mt-1 font-semibold flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Policy Violation</p>
                           </div>
+                          <div className="relative pl-6">
+                             <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full bg-slate-800 ring-4 ring-background" />
+                             <p className="text-[14.5px] font-semibold text-muted-foreground">Workflow Stopped</p>
+                             <p className="text-xs text-muted-foreground mt-1">Process Terminated</p>
+                          </div>
                           {invoiceDetails.rejection_reason && (
-                            <div className="relative pl-6 my-4">
-                              <div className="p-4 rounded-xl border border-red-200 bg-red-50 shadow-sm relative">
-                                <span className="absolute -left-[25px] top-4 h-4 w-4 rounded-full bg-red-200 ring-4 ring-background flex items-center justify-center">
-                                  <div className="h-1.5 w-1.5 rounded-full bg-red-500"></div>
-                                </span>
-                                <p className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Reason for Rejection</p>
-                                <p className="text-[14px] text-red-900">{invoiceDetails.rejection_reason}</p>
-                              </div>
+                            <div className="mt-4 p-4 rounded-xl border border-red-200 bg-red-50">
+                              <p className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Reason for Rejection</p>
+                              <p className="text-[14px] text-red-900">{invoiceDetails.rejection_reason}</p>
                             </div>
                           )}
-                          <div className="relative pl-6">
-                             <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full bg-muted ring-4 ring-background" />
-                             <p className="text-[14.5px] font-semibold text-muted-foreground">Waiting for Resubmission</p>
-                             <p className="text-xs text-muted-foreground mt-1">Vendor Action Required</p>
-                          </div>
                         </>
                       ) : (
                         <>
@@ -577,6 +687,31 @@ export default function InvoiceOperations() {
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Reject Invoice</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting this invoice. This will be stored for future reference and shared with the vendor.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Textarea
+              placeholder="E.g. The tax amount doesn't match the line items..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectDialogOpen(false)} disabled={actionLoading}>Cancel</Button>
+            <Button variant="destructive" onClick={() => handleAction("reject", rejectionReason)} disabled={!rejectionReason.trim() || actionLoading}>
+              Confirm Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );
