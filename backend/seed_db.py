@@ -25,7 +25,7 @@ Base.metadata.create_all(bind=engine)
 # 1. Create Vendors
 print("Creating vendors...")
 vendors_data = [
-    {"name": "OneBite Hapoli", "gstin": "24ABCDE1234F1Z5", "department": "Cafeteria", "bank": "HDFC0001234", "ifsc": "HDFC0001234"},
+    {"name": "OneBite Hapoli", "gstin": "24ABCDE1234F1Z5", "department": "Cafeteria", "bank": "50200012345678", "ifsc": "HDFC0001234"},
     {"name": "METRO Wholesale India", "gstin": "27AAACM1234N1Z5", "department": "Admin", "bank": "SBI0009876", "ifsc": "SBIN0009876"},
     {"name": "Dell Technologies India Pvt. Ltd.", "gstin": "29AADCD1234A1Z5", "department": "IT", "bank": "ICICI0005678", "ifsc": "ICIC0005678"},
     {"name": "Office Depot India", "gstin": "27AAAAO1234O1Z5", "department": "Admin", "bank": "AXIS0004321", "ifsc": "UTIB0004321"},
