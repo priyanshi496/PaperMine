@@ -5,6 +5,8 @@ from app.db import models
 from pydantic import BaseModel
 from typing import Optional
 from app.api.deps import get_current_user
+from datetime import datetime
+from app.services.vector_store import knowledge_engine
 
 router = APIRouter()
 
@@ -20,6 +22,7 @@ class InvoiceVerifyRequest(BaseModel):
 
 @router.get("/")
 def list_invoices(
+    vendor_id: Optional[int] = None,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -32,6 +35,8 @@ def list_invoices(
                 models.Document.uploaded_by_id == current_user.id
             )
         )
+    elif vendor_id is not None:
+        query = query.filter(models.Invoice.vendor_id == vendor_id)
     
     invoices = query.order_by(models.Invoice.id.desc()).all()
     return [
@@ -105,6 +110,8 @@ def get_invoice_by_document(
         "invoice_date": invoice.invoice_date or "",
         "total_amount": invoice.total_amount or "",
         "tax_amount": invoice.tax_amount or "",
+        "department": invoice.department or "",
+        "rejection_reason": invoice.rejection_reason or "",
         "verification_status": invoice.verification_status,
         "payment_status": invoice.payment_status or "Pending",
         "risk_score": invoice.risk_score or 0,
@@ -162,3 +169,71 @@ def verify_invoice(
         
     db.commit()
     return {"status": "verified"}
+
+class InvoiceActionRequest(BaseModel):
+    action: str  # "approve" or "reject"
+    reason: str | None = None
+
+@router.put("/{invoice_id}/action")
+def invoice_action(
+    invoice_id: int, 
+    req: InvoiceActionRequest, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "finance_team":
+        raise HTTPException(status_code=403, detail="Only finance team can perform this action")
+        
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+        
+    if req.action == "approve":
+        invoice.verification_status = "Approved"
+        invoice.approved_at = datetime.utcnow()
+        invoice.approved_by_id = current_user.id
+    elif req.action == "reject":
+        invoice.verification_status = "Rejected"
+        invoice.rejection_reason = req.reason
+        
+        # Add to Vector Store for RAG Memory
+        if req.reason and invoice.document_id:
+            vendor_id = invoice.vendor_id or 0
+            doc_type = "Invoice_Rejection"
+            category = "Finance_Feedback"
+            synthesized_text = f"Invoice {invoice.invoice_number or 'Unknown'} from vendor '{invoice.vendor.name if invoice.vendor else 'Unknown'}' was rejected by finance team. Reason: {req.reason}. Amount: {invoice.total_amount}. Date: {invoice.invoice_date}."
+            knowledge_engine.embed_and_store(
+                db=db, 
+                document_id=invoice.document_id,
+                vendor_id=vendor_id, 
+                doc_type=doc_type, 
+                category=category, 
+                synthesized_text=synthesized_text
+            )
+            
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
+        
+    db.commit()
+    return {"status": "success", "verification_status": invoice.verification_status}
+
+class InvoiceDepartmentRequest(BaseModel):
+    department: str
+
+@router.put("/{invoice_id}/department")
+def update_department(
+    invoice_id: int, 
+    req: InvoiceDepartmentRequest, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "finance_team":
+        raise HTTPException(status_code=403, detail="Only finance team can update department")
+        
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+        
+    invoice.department = req.department
+    db.commit()
+    return {"status": "success", "department": invoice.department}

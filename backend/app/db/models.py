@@ -112,6 +112,7 @@ class Invoice(Base):
     payment_status = Column(String, default="Pending") # Pending, Paid, Overdue
     verification_status = Column(String, default="Unverified") # Unverified, Verified, Disputed, Needs Manager Approval, Approved, Rejected
     risk_score = Column(Integer, default=0) # 0-10
+    rejection_reason = Column(Text, nullable=True)
     
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     approved_at = Column(DateTime, nullable=True)

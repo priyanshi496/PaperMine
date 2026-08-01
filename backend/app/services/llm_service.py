@@ -203,13 +203,13 @@ Return ONLY the raw JSON block. No markdown explanation.
             except Exception:
                 config = {"temperature": 0}
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt,
                 config=config
             )
             return response.text.strip()
         elif provider == "openai":
-            model = os.environ.get("LLM_MODEL", "gpt-4o-mini" if not os.environ.get("OPENROUTER_API_KEY") else "google/gemini-2.5-flash")
+            model = os.environ.get("LLM_MODEL", "gpt-4o-mini" if not os.environ.get("OPENROUTER_API_KEY") else "google/gemma-4-31b-it")
             response = client.chat.completions.create(
                 model=model,
                 temperature=0,
@@ -257,7 +257,7 @@ no markdown, no explanation. Example: {{"0": "Beverages", "1": "Snacks"}}"""
             except Exception:
                 config = {"temperature": 0}
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt,
                 config=config
             )
@@ -477,7 +477,7 @@ Return a JSON object ONLY (no markdown, no explanation):
             except Exception:
                 config = {"temperature": 0}
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt_text,
                 config=config
             )
@@ -669,7 +669,7 @@ Same as above: provide an Executive Insight, followed by a breakdown table (with
     try:
         if provider == "gemini":
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt
             )
             return response.text.strip()
@@ -809,7 +809,7 @@ You help businesses understand invoices, vendors, expenses, and fraud risks.
         if provider == "gemini":
             response = await asyncio.to_thread(
                 client.models.generate_content,
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt,
                 config={"response_modalities": ["TEXT"]}
             )
@@ -817,7 +817,7 @@ You help businesses understand invoices, vendors, expenses, and fraud risks.
             # so we'll simulate streaming by chunking the text if native stream fails or just stream it.
             # We'll use the blocking stream and yield it in an async generator.
             stream_response = client.models.generate_content_stream(
-                model="gemini-2.5-flash",
+                model="gemma-4-31b-it",
                 contents=prompt
             )
             for chunk in stream_response:

@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
-import { Trash2, Plus, Loader2, UserPlus } from "lucide-react";
+import { Trash2, Plus, Loader2, UserPlus, Building2 } from "lucide-react";
 
 export default function VendorsPage() {
   const { authState } = useAuth();
@@ -17,13 +17,20 @@ export default function VendorsPage() {
   const [newVendorGstin, setNewVendorGstin] = useState("");
   const [isAdding, setIsAdding] = useState(false);
 
-  const fetchVendors = () => {
-    axios.get("http://localhost:8000/api/v1/auth/vendors").then(res => setVendors(res.data));
+  const fetchVendors = async () => {
+    try {
+      const res = await axios.get("http://localhost:8000/api/v1/vendors/", {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setVendors(res.data);
+    } catch (e) {
+      console.error("Failed to fetch vendors", e);
+    }
   };
 
   useEffect(() => {
     setMounted(true);
-    if (authState.user?.role === "admin") {
+    if (authState.user && ["admin", "finance_team", "cfo"].includes(authState.user.role)) {
       fetchVendors();
     }
   }, [authState]);
@@ -61,7 +68,7 @@ export default function VendorsPage() {
 
   if (!mounted || !authState.user) return null;
 
-  if (authState.user.role !== "admin") {
+  if (!["admin", "finance_team", "cfo"].includes(authState.user.role)) {
     return <div className="p-8 text-error">Access Denied</div>;
   }
 
@@ -87,12 +94,14 @@ export default function VendorsPage() {
                   <span className="material-symbols-outlined text-secondary">groups</span>
                   Registered Vendors
                 </h2>
-                <button 
-                  onClick={() => setShowAddModal(true)}
-                  className="flex items-center gap-2 bg-primary text-on-primary font-mono text-[13px] px-4 py-2 rounded-lg hover:bg-on-primary-fixed-variant transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Add Vendor
-                </button>
+                {authState.user.role === "admin" && (
+                  <button 
+                    onClick={() => setShowAddModal(true)}
+                    className="flex items-center gap-2 bg-primary text-on-primary font-mono text-[13px] px-4 py-2 rounded-lg hover:bg-on-primary-fixed-variant transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Add Vendor
+                  </button>
+                )}
             </div>
             
             <div className="bg-white border border-outline-variant rounded-xl overflow-hidden shadow-sm">
@@ -101,39 +110,57 @@ export default function VendorsPage() {
                     <tr>
                         <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono">ID</th>
                         <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono">Name</th>
-                        <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono">GSTIN</th>
+                        <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono">Pending / Total Spent</th>
                         <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono">Status</th>
-                        <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono text-right">Actions</th>
+                        {authState.user.role === "admin" && <th className="px-6 py-4 font-bold text-on-surface-variant uppercase tracking-wider text-[11px] font-mono text-right">Actions</th>}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
                     {vendors.map(v => (
-                        <tr key={v.id} className="hover:bg-surface-container-low/50 transition-colors group">
+                        <tr 
+                          key={v.id} 
+                          className="hover:bg-surface-container-low/50 transition-colors group cursor-pointer"
+                          onClick={() => router.push(`/operations/vendors/${v.id}`)}
+                        >
                             <td className="px-6 py-4 text-on-surface-variant font-mono">{v.id}</td>
-                            <td className="px-6 py-4 font-medium text-on-surface flex items-center gap-2">
-                              <div className="w-6 h-6 rounded bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-[10px]">
-                                {v.name.charAt(0)}
+                            <td className="px-6 py-4 font-medium text-on-surface flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                                <Building2 className="w-4 h-4" />
                               </div>
                               {v.name}
                             </td>
-                            <td className="px-6 py-4 text-on-surface-variant font-mono text-[12px]">{v.gstin || "N/A"}</td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col">
+                                <span className="text-[13px] font-bold text-orange-600">
+                                  {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(v.pending_amount || 0)} <span className="text-[11px] text-muted-foreground font-normal">({v.pending_count} pending)</span>
+                                </span>
+                                <span className="text-[12px] text-muted-foreground">
+                                  {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(v.total_spent || 0)} Total
+                                </span>
+                              </div>
+                            </td>
                             <td className="px-6 py-4">
                                 <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold tracking-wide uppercase border border-emerald-100">Active</span>
                             </td>
-                            <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={() => handleDeleteVendor(v.id)}
-                                className="text-error hover:bg-error-container p-2 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                title="Delete Vendor"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
+                            {authState.user.role === "admin" && (
+                              <td className="px-6 py-4 text-right">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteVendor(v.id);
+                                  }}
+                                  className="text-error hover:bg-error-container p-2 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                  title="Delete Vendor"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            )}
                         </tr>
                     ))}
                     {vendors.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="text-center py-8 text-on-surface-variant">No vendors found.</td>
+                        <td colSpan={authState.user.role === "admin" ? 5 : 4} className="text-center py-8 text-on-surface-variant">No vendors found.</td>
                       </tr>
                     )}
                 </tbody>
@@ -141,15 +168,6 @@ export default function VendorsPage() {
             </div>
         </div>
 
-        <div className="flex flex-col gap-4">
-             <h2 className="font-sans text-[18px] font-semibold text-on-surface flex items-center gap-2">
-              <span className="material-symbols-outlined text-secondary">receipt_long</span>
-              Global Invoice Ledger
-            </h2>
-             <div className="bg-white border border-outline-variant rounded-xl overflow-hidden min-h-[500px]">
-                <VendorInvoicesTable />
-             </div>
-        </div>
       </div>
 
       {/* Add Vendor Modal */}

@@ -40,3 +40,17 @@ Thumbs.db
 backend/temp_page_*
 *.png
 
+# --- Added Missing Exclusions ---
+# Python Virtual Environment
+.venv/
+backend/.venv/
+
+# Databases & Indexes
+*.db
+*.bin
+
+# Temporary & Test Files
+backend/curl_output.txt
+backend/test_results.txt
+backend/scratch_test.py
+backend/scratch/

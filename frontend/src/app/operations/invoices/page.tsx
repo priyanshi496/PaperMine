@@ -18,11 +18,21 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Search, AlertTriangle, FileText, CheckCircle2, FileCheck2, Bot, Building2, CreditCard, Download, ArrowRight, ShieldCheck } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +51,9 @@ export default function InvoiceOperations() {
   const [invoiceDetails, setInvoiceDetails] = useState<any | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
 
   useEffect(() => {
     setPageContext({ 
@@ -93,6 +106,43 @@ export default function InvoiceOperations() {
       console.error(e);
     } finally {
       setDetailsLoading(false);
+    }
+  };
+
+  const handleAction = async (action: "approve" | "reject", reason?: string) => {
+    if (!invoiceDetails) return;
+    try {
+      setActionLoading(true);
+      await axios.put(`http://localhost:8000/api/v1/invoices/${invoiceDetails.id}/action`, { action, reason }, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setInvoiceDetails({ 
+        ...invoiceDetails, 
+        verification_status: action === "approve" ? "Approved" : "Rejected",
+        rejection_reason: reason || invoiceDetails.rejection_reason
+      });
+      fetchInvoices();
+      if (action === "reject") {
+        setRejectDialogOpen(false);
+        setRejectionReason("");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDepartmentChange = async (val: string) => {
+    if (!invoiceDetails) return;
+    try {
+      await axios.put(`http://localhost:8000/api/v1/invoices/${invoiceDetails.id}/department`, { department: val }, {
+        headers: { Authorization: `Bearer ${authState.token}` }
+      });
+      setInvoiceDetails({ ...invoiceDetails, department: val });
+      fetchInvoices();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -209,10 +259,27 @@ export default function InvoiceOperations() {
                       <Download className="w-3.5 h-3.5"/> PDF
                     </Button>
                     {authState.user?.role === "finance_team" ? (
-                      invoiceDetails.verification_status === "Vendor Confirmed" && (
-                        <Button variant="default" size="sm" className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground">
-                          Approve
-                        </Button>
+                      (invoiceDetails.verification_status !== "Approved" && invoiceDetails.verification_status !== "Rejected") && (
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            onClick={() => setRejectDialogOpen(true)}
+                            disabled={actionLoading}
+                          >
+                            Reject
+                          </Button>
+                          <Button 
+                            variant="default" 
+                            size="sm" 
+                            className="h-8 gap-1.5 px-4 rounded-full text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                            onClick={() => handleAction("approve")}
+                            disabled={actionLoading}
+                          >
+                            Approve
+                          </Button>
+                        </div>
                       )
                     ) : authState.user?.role === "vendor" ? (
                       invoiceDetails.verification_status === "Unverified" && (
@@ -280,6 +347,29 @@ export default function InvoiceOperations() {
                     <div>
                       <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider mb-2">Payment Terms</p>
                       <p className="font-semibold text-[15px] text-foreground">Net 30</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider mb-2">Department</p>
+                      {authState.user?.role === "finance_team" ? (
+                        <Select 
+                          value={invoiceDetails.department || ""} 
+                          onValueChange={handleDepartmentChange}
+                        >
+                          <SelectTrigger className="h-8 w-full text-sm font-semibold">
+                            <SelectValue placeholder="Select Department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="IT">IT</SelectItem>
+                            <SelectItem value="HR">HR</SelectItem>
+                            <SelectItem value="Admin">Admin</SelectItem>
+                            <SelectItem value="Cafeteria">Cafeteria</SelectItem>
+                            <SelectItem value="Sales">Sales</SelectItem>
+                            <SelectItem value="Marketing">Marketing</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="font-semibold text-[15px] text-foreground">{invoiceDetails.department || "Unassigned"}</p>
+                      )}
                     </div>
                   </div>
 
@@ -551,6 +641,12 @@ export default function InvoiceOperations() {
                              <p className="text-[14.5px] font-semibold text-muted-foreground">Workflow Stopped</p>
                              <p className="text-xs text-muted-foreground mt-1">Process Terminated</p>
                           </div>
+                          {invoiceDetails.rejection_reason && (
+                            <div className="mt-4 p-4 rounded-xl border border-red-200 bg-red-50">
+                              <p className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Reason for Rejection</p>
+                              <p className="text-[14px] text-red-900">{invoiceDetails.rejection_reason}</p>
+                            </div>
+                          )}
                         </>
                       ) : (
                         <>
@@ -574,6 +670,31 @@ export default function InvoiceOperations() {
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Reject Invoice</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting this invoice. This will be stored for future reference and shared with the vendor.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Textarea
+              placeholder="E.g. The tax amount doesn't match the line items..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectDialogOpen(false)} disabled={actionLoading}>Cancel</Button>
+            <Button variant="destructive" onClick={() => handleAction("reject", rejectionReason)} disabled={!rejectionReason.trim() || actionLoading}>
+              Confirm Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

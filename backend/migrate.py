@@ -15,9 +15,15 @@ except Exception as e:
 # Invoices
 try:
     cursor.execute("ALTER TABLE invoices ADD COLUMN risk_score INTEGER DEFAULT 0;")
-    print("Invoice columns added")
+    print("Invoice risk_score added")
 except Exception as e:
-    print("Invoice columns may already exist:", e)
+    print("Invoice risk_score may already exist:", e)
+
+try:
+    cursor.execute("ALTER TABLE invoices ADD COLUMN rejection_reason TEXT;")
+    print("Invoice rejection_reason added")
+except Exception as e:
+    print("Invoice rejection_reason may already exist:", e)
 
 # InsightAlerts
 try:
